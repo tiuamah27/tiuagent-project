@@ -1,5 +1,7 @@
 import Docker from 'dockerode';
 import type { ContainerInfo } from 'dockerode';
+import { access } from 'node:fs/promises';
+import { constants } from 'node:fs';
 import type { DockerContainer, DockerResponse } from '../types/docker.types.js';
 
 const CACHE_TTL_MS = 30_000;
@@ -11,6 +13,10 @@ let cachedAt = 0;
 const docker = new Docker({
   socketPath: process.env.DOCKER_SOCKET_PATH ?? DEFAULT_DOCKER_SOCKET_PATH
 });
+
+function getDockerSocketPath(): string {
+  return process.env.DOCKER_SOCKET_PATH ?? DEFAULT_DOCKER_SOCKET_PATH;
+}
 
 function getCachedResponse(): DockerResponse | null {
   if (!cachedResponse) {
@@ -25,6 +31,45 @@ function setCachedResponse(response: DockerResponse): DockerResponse {
   cachedAt = Date.now();
 
   return response;
+}
+
+async function getDockerUnavailableReason(error: unknown): Promise<DockerResponse> {
+  const socketPath = getDockerSocketPath();
+
+  try {
+    await access(socketPath, constants.F_OK);
+  } catch {
+    return {
+      status: 'unavailable',
+      reason: 'socket_not_found'
+    };
+  }
+
+  try {
+    await access(socketPath, constants.R_OK | constants.W_OK);
+  } catch {
+    return {
+      status: 'unavailable',
+      reason: 'permission_denied'
+    };
+  }
+
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'code' in error &&
+    (error as { code?: string }).code === 'EACCES'
+  ) {
+    return {
+      status: 'unavailable',
+      reason: 'permission_denied'
+    };
+  }
+
+  return {
+    status: 'unavailable',
+    reason: 'docker_connection_failed'
+  };
 }
 
 function normalizeContainerName(container: ContainerInfo): string {
@@ -99,9 +144,7 @@ export async function getDockerOverview(): Promise<DockerResponse> {
       containers,
       timestamp: new Date().toISOString()
     });
-  } catch {
-    return setCachedResponse({
-      status: 'unavailable'
-    });
+  } catch (error) {
+    return setCachedResponse(await getDockerUnavailableReason(error));
   }
 }

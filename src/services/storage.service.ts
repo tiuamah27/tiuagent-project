@@ -11,6 +11,11 @@ const CACHE_TTL_SECONDS = 60;
 const CACHE_TTL_MS = CACHE_TTL_SECONDS * 1000;
 const FOLDER_SCAN_TIMEOUT_MS = 5000;
 const DEFAULT_STORAGE_PATHS = ['/opt/apps', '/opt/infra', '/home'];
+const HOST_MOUNT_STORAGE_PATHS: Record<string, string> = {
+  '/opt/apps': '/host/opt/apps',
+  '/opt/infra': '/host/opt/infra',
+  '/home': '/host/home'
+};
 
 let cachedResponse: StorageResponse | null = null;
 let cachedAt = 0;
@@ -37,6 +42,25 @@ function getStoragePaths(): string[] {
     .filter(Boolean);
 
   return paths.length > 0 ? paths : DEFAULT_STORAGE_PATHS;
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path, constants.F_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveRuntimePath(path: string): Promise<string> {
+  const hostMountPath = HOST_MOUNT_STORAGE_PATHS[path];
+
+  if (hostMountPath && (await pathExists(hostMountPath))) {
+    return hostMountPath;
+  }
+
+  return path;
 }
 
 function getFolderLabel(path: string): string {
@@ -80,10 +104,9 @@ async function getDiskSummary(): Promise<StorageSummary> {
 
 async function getFolderSize(path: string): Promise<StorageFolder> {
   const label = getFolderLabel(path);
+  const runtimePath = await resolveRuntimePath(path);
 
-  try {
-    await access(path, constants.F_OK);
-  } catch {
+  if (!(await pathExists(runtimePath))) {
     return {
       path,
       label,
@@ -93,7 +116,7 @@ async function getFolderSize(path: string): Promise<StorageFolder> {
   }
 
   try {
-    const { stdout } = await execFileAsync('du', ['-sb', path], {
+    const { stdout } = await execFileAsync('du', ['-sb', runtimePath], {
       timeout: FOLDER_SCAN_TIMEOUT_MS,
       windowsHide: true
     });
@@ -112,7 +135,7 @@ async function getFolderSize(path: string): Promise<StorageFolder> {
     return {
       path,
       label,
-      sizeGiB: roundTo(bytesToGiB(sizeBytes)),
+      sizeGiB: roundTo(bytesToGiB(sizeBytes), 3),
       status: 'ok'
     };
   } catch (error) {

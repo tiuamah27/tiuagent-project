@@ -7,7 +7,7 @@ export async function dockerRoutes(app: FastifyInstance): Promise<void> {
     const response = await getDockerOverview();
 
     if ('status' in response && response.status === 'unavailable') {
-      request.log.warn('docker engine unavailable');
+      request.log.warn({ reason: response.reason }, 'docker engine unavailable');
     }
 
     return response;

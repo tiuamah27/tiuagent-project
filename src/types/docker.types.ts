@@ -22,6 +22,7 @@ export interface DockerAvailableResponse {
 
 export interface DockerUnavailableResponse {
   status: 'unavailable';
+  reason: 'permission_denied' | 'socket_not_found' | 'docker_connection_failed';
 }
 
 export type DockerResponse = DockerAvailableResponse | DockerUnavailableResponse;
