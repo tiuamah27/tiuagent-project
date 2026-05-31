@@ -20,6 +20,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /opt/apps:/host/opt/apps:ro
       - /opt/infra:/host/opt/infra:ro
+      - /opt/backups:/host/opt/backups:ro
     healthcheck:
       test:
         [
