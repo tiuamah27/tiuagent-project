@@ -1,6 +1,7 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerCors } from './plugins/cors.js';
 import { appsRoutes } from './routes/apps.js';
+import { automationRoutes } from './routes/automation.js';
 import { dockerRoutes } from './routes/docker.js';
 import { hanfinRoutes } from './routes/hanfin.js';
 import { healthRoutes } from './routes/health.js';
@@ -91,6 +92,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(appsRoutes, { prefix: '/api/v1' });
   await app.register(infrastructureRoutes, { prefix: '/api/v1' });
   await app.register(hanfinRoutes, { prefix: '/api/v1' });
+  await app.register(automationRoutes, { prefix: '/api/v1' });
 
   return app;
 }
