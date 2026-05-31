@@ -5,6 +5,7 @@ services:
     container_name: tiu-agent
     hostname: ${SERVER_HOSTNAME:-tiuserver}
     restart: unless-stopped
+    pid: host
     environment:
       NODE_ENV: ${NODE_ENV:-production}
       HOST: ${HOST:-0.0.0.0}

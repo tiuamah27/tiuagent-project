@@ -14,6 +14,9 @@ RUN npm prune --omit=dev
 FROM node:22-bookworm-slim AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends procps \
+  && rm -rf /var/lib/apt/lists/*
 RUN useradd --create-home --shell /usr/sbin/nologin tiuagent
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
