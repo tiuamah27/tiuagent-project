@@ -11,6 +11,7 @@ services:
       PORT: ${PORT:-8080}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       SERVER_HOSTNAME: ${SERVER_HOSTNAME:-tiuserver}
+      STORAGE_PATHS: ${STORAGE_PATHS:-/opt/apps,/opt/infra,/home}
     ports:
       - "${PORT:-8080}:${PORT:-8080}"
     healthcheck:

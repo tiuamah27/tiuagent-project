@@ -2,6 +2,7 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import { registerCors } from './plugins/cors.js';
 import { healthRoutes } from './routes/health.js';
 import { rootRoutes } from './routes/root.js';
+import { storageRoutes } from './routes/storage.js';
 import { systemRoutes } from './routes/system.js';
 import { versionRoutes } from './routes/version.js';
 
@@ -81,6 +82,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(versionRoutes, { prefix: '/api/v1' });
   await app.register(healthRoutes, { prefix: '/api/v1' });
   await app.register(systemRoutes, { prefix: '/api/v1' });
+  await app.register(storageRoutes, { prefix: '/api/v1' });
 
   return app;
 }
