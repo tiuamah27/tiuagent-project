@@ -1,7 +1,7 @@
 export interface AutomationResponse {
   name: 'n8n';
   container: 'n8n';
-  status: string;
+  status: 'running' | 'stopped';
   healthy: boolean;
   deployment: {
     environment: string;

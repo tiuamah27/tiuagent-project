@@ -1,6 +1,6 @@
 # TiuAgent
 
-TiuAgent v0.1 provides real-time infrastructure data from TiuServer to TiuOS.
+TiuAgent v1.0.0 provides real-time infrastructure data from TiuServer to TiuOS.
 
 ## Runtime
 
@@ -11,7 +11,7 @@ TiuAgent v0.1 provides real-time infrastructure data from TiuServer to TiuOS.
 - TypeScript
 - Fastify
 
-Expected deployment path:
+Deployment path:
 
 ```bash
 /opt/infra/tiu-agent
@@ -24,7 +24,7 @@ Expected deployment path:
 ```json
 {
   "service": "TiuAgent",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "status": "online"
 }
 ```
@@ -34,7 +34,7 @@ Expected deployment path:
 ```json
 {
   "name": "tiu-agent",
-  "version": "0.1.0"
+  "version": "1.0.0"
 }
 ```
 
@@ -44,7 +44,7 @@ Expected deployment path:
 {
   "status": "healthy",
   "hostname": "tiuserver",
-  "timestamp": "2026-05-31T13:00:00.000Z"
+  "timestamp": "2026-05-31T16:00:00.000Z"
 }
 ```
 
@@ -66,7 +66,202 @@ Expected deployment path:
 }
 ```
 
-Memory and disk values are reported in GiB. CPU usage is a percentage sampled over a short interval.
+### `GET /api/v1/storage`
+
+```json
+{
+  "summary": {
+    "path": "/",
+    "totalGiB": 512,
+    "usedGiB": 42,
+    "freeGiB": 470,
+    "usagePercent": 8.2
+  },
+  "folders": [],
+  "timestamp": "2026-05-31T16:00:00.000Z",
+  "cache": {
+    "enabled": true,
+    "ttlSeconds": 60,
+    "refreshedAt": "2026-05-31T16:00:00.000Z"
+  }
+}
+```
+
+### `GET /api/v1/docker`
+
+```json
+{
+  "summary": {
+    "total": 8,
+    "running": 8,
+    "stopped": 0
+  },
+  "containers": [],
+  "timestamp": "2026-05-31T16:00:00.000Z"
+}
+```
+
+Unavailable response:
+
+```json
+{
+  "status": "unavailable",
+  "reason": "docker_connection_failed"
+}
+```
+
+### `GET /api/v1/apps`
+
+```json
+{
+  "summary": {
+    "total": 8,
+    "running": 8,
+    "stopped": 0
+  },
+  "apps": [],
+  "timestamp": "2026-05-31T16:00:00.000Z"
+}
+```
+
+### `GET /api/v1/infrastructure`
+
+```json
+{
+  "server": {
+    "hostname": "tiuserver",
+    "status": "online"
+  },
+  "system": {
+    "cpu": {
+      "usage": 2
+    },
+    "memory": {
+      "used": 1.3,
+      "total": 15.5
+    }
+  },
+  "storage": {
+    "usedPercent": 10.3
+  },
+  "docker": {
+    "status": "online",
+    "containers": 8,
+    "running": 8
+  },
+  "applications": {
+    "total": 8,
+    "healthy": 8
+  },
+  "timestamp": "2026-05-31T16:00:00.000Z"
+}
+```
+
+### `GET /api/v1/hanfin`
+
+```json
+{
+  "name": "HanFin",
+  "container": "hanfin",
+  "status": "running",
+  "healthy": true,
+  "deployment": {
+    "environment": "production"
+  },
+  "application": {
+    "version": "unknown",
+    "branch": "unknown",
+    "commit": "unknown"
+  },
+  "database": {
+    "status": "unavailable"
+  },
+  "timestamp": "2026-05-31T16:00:00.000Z"
+}
+```
+
+### `GET /api/v1/automation`
+
+```json
+{
+  "name": "n8n",
+  "container": "n8n",
+  "status": "running",
+  "healthy": true,
+  "deployment": {
+    "environment": "production"
+  },
+  "automation": {
+    "version": "unknown",
+    "workflows": "unknown",
+    "executions": "unknown"
+  },
+  "timestamp": "2026-05-31T16:00:00.000Z"
+}
+```
+
+### `GET /api/v1/cloudflare`
+
+```json
+{
+  "name": "Cloudflare Tunnel",
+  "status": "running",
+  "healthy": true,
+  "source": "process",
+  "network": {
+    "publicAccess": true
+  },
+  "tunnel": {
+    "status": "running"
+  },
+  "timestamp": "2026-05-31T16:00:00.000Z"
+}
+```
+
+### `GET /api/v1/backups`
+
+```json
+{
+  "status": "available",
+  "summary": {
+    "totalLocations": 3,
+    "existingLocations": 1
+  },
+  "locations": [
+    {
+      "path": "/host/opt/backups",
+      "exists": true
+    }
+  ],
+  "timestamp": "2026-05-31T16:00:00.000Z"
+}
+```
+
+## Status Values
+
+Public `status` fields use these stable values:
+
+```text
+online
+offline
+running
+stopped
+healthy
+unhealthy
+available
+unavailable
+not_found
+not_configured
+```
+
+Runtime module errors return:
+
+```json
+{
+  "status": "unavailable",
+  "reason": "runtime_error"
+}
+```
 
 ## Configuration
 
@@ -78,28 +273,16 @@ Copy `.env.example` to `.env` and adjust values as needed.
 | `HOST` | `0.0.0.0` | Bind address. |
 | `PORT` | `8080` | HTTP port. |
 | `LOG_LEVEL` | `info` | Fastify logger level. |
-| `SERVER_HOSTNAME` | `tiuserver` | Hostname shown by `/health`. |
+| `SERVER_HOSTNAME` | `tiuserver` | Hostname shown by health and infrastructure endpoints. |
+| `STORAGE_PATHS` | `/host/opt/apps,/host/opt/infra,/home` | Storage folders to monitor. |
+| `DOCKER_SOCKET_PATH` | `/var/run/docker.sock` | Docker Engine socket path. |
 
-## Installation
+## Deployment
 
 ```bash
 sudo mkdir -p /opt/infra/tiu-agent
 sudo chown -R "$USER":"$USER" /opt/infra/tiu-agent
 cd /opt/infra/tiu-agent
-npm install
-npm run dev
-```
-
-## Production Build
-
-```bash
-npm run build
-npm start
-```
-
-## Deployment
-
-```bash
 cp .env.example .env
 docker compose up -d --build
 ```
@@ -112,6 +295,20 @@ curl http://localhost:8080/
 curl http://localhost:8080/api/v1/version
 curl http://localhost:8080/api/v1/health
 curl http://localhost:8080/api/v1/system
+curl http://localhost:8080/api/v1/storage
+curl http://localhost:8080/api/v1/docker
+curl http://localhost:8080/api/v1/apps
+curl http://localhost:8080/api/v1/infrastructure
+curl http://localhost:8080/api/v1/hanfin
+curl http://localhost:8080/api/v1/automation
+curl http://localhost:8080/api/v1/cloudflare
+curl http://localhost:8080/api/v1/backups
 ```
 
-This release intentionally does not include Docker, Storage, HanFin, or n8n integrations.
+## Local Build
+
+```bash
+npm install
+npm run build
+npm start
+```

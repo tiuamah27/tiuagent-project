@@ -68,9 +68,8 @@ function registerErrorHandlers(app: FastifyInstance): void {
       normalizedError.statusCode && normalizedError.statusCode >= 400 ? normalizedError.statusCode : 500;
 
     return reply.code(statusCode).send({
-      error: statusCode >= 500 ? 'Internal Server Error' : (normalizedError.name ?? 'Error'),
-      message: statusCode >= 500 ? 'An unexpected error occurred' : (normalizedError.message ?? 'Unknown error'),
-      statusCode
+      status: 'unavailable',
+      reason: statusCode >= 500 ? 'runtime_error' : (normalizedError.message ?? 'request_failed')
     });
   });
 }

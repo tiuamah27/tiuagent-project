@@ -1,12 +1,12 @@
 export interface RootResponse {
   service: 'TiuAgent';
-  version: '0.1.0';
+  version: '1.0.0';
   status: 'online';
 }
 
 export interface VersionResponse {
   name: 'tiu-agent';
-  version: '0.1.0';
+  version: '1.0.0';
 }
 
 export interface HealthResponse {

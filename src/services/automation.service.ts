@@ -13,7 +13,7 @@ export async function getAutomationOverview(): Promise<AutomationResponse> {
   return {
     name: 'n8n',
     container: 'n8n',
-    status: n8n?.status ?? 'unknown',
+    status: n8n?.status === 'running' ? 'running' : 'stopped',
     healthy: n8n?.healthy ?? false,
     deployment: {
       environment: process.env.NODE_ENV ?? 'production'

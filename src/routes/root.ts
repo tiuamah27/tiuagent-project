@@ -5,7 +5,7 @@ export async function rootRoutes(app: FastifyInstance): Promise<void> {
   app.get<{ Reply: RootResponse }>('/', async () => {
     return {
       service: 'TiuAgent',
-      version: '0.1.0',
+      version: '1.0.0',
       status: 'online'
     };
   });

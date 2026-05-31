@@ -13,7 +13,7 @@ export async function getHanFinOverview(): Promise<HanFinResponse> {
   return {
     name: 'HanFin',
     container: 'hanfin',
-    status: hanfin?.status ?? 'unknown',
+    status: hanfin?.status === 'running' ? 'running' : 'stopped',
     healthy: hanfin?.healthy ?? false,
     deployment: {
       environment: process.env.NODE_ENV ?? 'production'
@@ -24,7 +24,7 @@ export async function getHanFinOverview(): Promise<HanFinResponse> {
       commit: 'unknown'
     },
     database: {
-      status: 'unknown'
+      status: 'unavailable'
     },
     timestamp: new Date().toISOString()
   };

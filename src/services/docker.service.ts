@@ -83,7 +83,19 @@ function normalizeContainerName(container: ContainerInfo): string {
 }
 
 function normalizeContainerStatus(container: ContainerInfo): string {
-  return container.State || 'unknown';
+  return container.State === 'running' ? 'running' : 'stopped';
+}
+
+function normalizeContainerState(state: string): string {
+  if (state === 'healthy' || state === 'running') {
+    return state;
+  }
+
+  if (state === 'unhealthy') {
+    return 'unhealthy';
+  }
+
+  return 'stopped';
 }
 
 function formatContainerCreated(created: number): string {
@@ -103,7 +115,7 @@ function formatContainerPorts(container: ContainerInfo): string[] {
 async function getContainerState(container: ContainerInfo): Promise<string> {
   try {
     const detail = await docker.getContainer(container.Id).inspect();
-    return detail.State.Health?.Status ?? detail.State.Status ?? normalizeContainerStatus(container);
+    return normalizeContainerState(detail.State.Health?.Status ?? detail.State.Status ?? normalizeContainerStatus(container));
   } catch {
     return normalizeContainerStatus(container);
   }

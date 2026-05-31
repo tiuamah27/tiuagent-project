@@ -8,7 +8,7 @@ export interface CloudflareDockerResponse {
     publicAccess: boolean;
   };
   tunnel: {
-    status: 'connected' | 'disconnected';
+    status: 'running' | 'stopped';
   };
   timestamp: string;
 }
@@ -22,7 +22,7 @@ export interface CloudflareProcessResponse {
     publicAccess: true;
   };
   tunnel: {
-    status: 'connected';
+    status: 'running';
   };
   timestamp: string;
 }

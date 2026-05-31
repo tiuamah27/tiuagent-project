@@ -41,7 +41,7 @@ export async function getCloudflareOverview(): Promise<CloudflareResponse> {
           publicAccess: true
         },
         tunnel: {
-          status: 'connected'
+          status: 'running'
         },
         timestamp: new Date().toISOString()
       };
@@ -64,7 +64,7 @@ export async function getCloudflareOverview(): Promise<CloudflareResponse> {
       publicAccess: healthy
     },
     tunnel: {
-      status: healthy ? 'connected' : 'disconnected'
+      status: healthy ? 'running' : 'stopped'
     },
     timestamp: new Date().toISOString()
   };

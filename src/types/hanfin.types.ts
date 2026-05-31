@@ -1,7 +1,7 @@
 export interface HanFinResponse {
   name: 'HanFin';
   container: 'hanfin';
-  status: string;
+  status: 'running' | 'stopped';
   healthy: boolean;
   deployment: {
     environment: string;
@@ -12,7 +12,7 @@ export interface HanFinResponse {
     commit: 'unknown';
   };
   database: {
-    status: 'unknown';
+    status: 'unavailable';
   };
   timestamp: string;
 }
