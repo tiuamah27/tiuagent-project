@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import { registerCors } from './plugins/cors.js';
+import { activityRoutes } from './routes/activity.js';
 import { appsRoutes } from './routes/apps.js';
 import { automationRoutes } from './routes/automation.js';
 import { backupsRoutes } from './routes/backups.js';
@@ -96,6 +97,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(automationRoutes, { prefix: '/api/v1' });
   await app.register(cloudflareRoutes, { prefix: '/api/v1' });
   await app.register(backupsRoutes, { prefix: '/api/v1' });
+  await app.register(activityRoutes, { prefix: '/api/v1' });
 
   return app;
 }

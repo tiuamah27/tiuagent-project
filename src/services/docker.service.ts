@@ -14,6 +14,26 @@ const docker = new Docker({
   socketPath: process.env.DOCKER_SOCKET_PATH ?? DEFAULT_DOCKER_SOCKET_PATH
 });
 
+interface DockerStatsSnapshot {
+  cpu_stats?: {
+    cpu_usage?: {
+      total_usage?: number;
+      percpu_usage?: number[];
+    };
+    system_cpu_usage?: number;
+    online_cpus?: number;
+  };
+  precpu_stats?: {
+    cpu_usage?: {
+      total_usage?: number;
+    };
+    system_cpu_usage?: number;
+  };
+  memory_stats?: {
+    usage?: number;
+  };
+}
+
 function getDockerSocketPath(): string {
   return process.env.DOCKER_SOCKET_PATH ?? DEFAULT_DOCKER_SOCKET_PATH;
 }
@@ -112,6 +132,66 @@ function formatContainerPorts(container: ContainerInfo): string[] {
   });
 }
 
+function formatPercent(value: number): string {
+  return `${Math.max(0, value).toFixed(1)}%`;
+}
+
+function formatBytes(bytes: number): string {
+  const mib = bytes / 1024 ** 2;
+
+  if (mib < 1024) {
+    return `${Math.round(mib)} MB`;
+  }
+
+  return `${(mib / 1024).toFixed(1)} GB`;
+}
+
+function formatUptime(startedAt?: string): string {
+  if (!startedAt || startedAt.startsWith('0001-')) {
+    return '0m';
+  }
+
+  const elapsedMs = Date.now() - new Date(startedAt).getTime();
+
+  if (!Number.isFinite(elapsedMs) || elapsedMs <= 0) {
+    return '0m';
+  }
+
+  const elapsedMinutes = Math.floor(elapsedMs / 60_000);
+  const days = Math.floor(elapsedMinutes / 1440);
+  const hours = Math.floor((elapsedMinutes % 1440) / 60);
+  const minutes = elapsedMinutes % 60;
+
+  if (days > 0) {
+    return `${days}d ${hours}h`;
+  }
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  return `${minutes}m`;
+}
+
+function calculateCpuPercent(stats: DockerStatsSnapshot): number {
+  const totalUsage = stats.cpu_stats?.cpu_usage?.total_usage ?? 0;
+  const previousTotalUsage = stats.precpu_stats?.cpu_usage?.total_usage ?? 0;
+  const systemUsage = stats.cpu_stats?.system_cpu_usage ?? 0;
+  const previousSystemUsage = stats.precpu_stats?.system_cpu_usage ?? 0;
+  const cpuDelta = totalUsage - previousTotalUsage;
+  const systemDelta = systemUsage - previousSystemUsage;
+  const onlineCpus =
+    stats.cpu_stats?.online_cpus ??
+    stats.cpu_stats?.cpu_usage?.percpu_usage?.length ??
+    1;
+
+  if (cpuDelta <= 0 || systemDelta <= 0) {
+    return 0;
+  }
+
+  return (cpuDelta / systemDelta) * onlineCpus * 100;
+}
+
 async function getContainerState(container: ContainerInfo): Promise<string> {
   try {
     const detail = await docker.getContainer(container.Id).inspect();
@@ -122,14 +202,41 @@ async function getContainerState(container: ContainerInfo): Promise<string> {
 }
 
 async function mapContainer(container: ContainerInfo): Promise<DockerContainer> {
-  const state = await getContainerState(container);
+  const dockerContainer = docker.getContainer(container.Id);
+  const status = normalizeContainerStatus(container);
+  let state = status;
+  let cpu = '0.0%';
+  let ram = '0 MB';
+  let uptime = '0m';
+
+  try {
+    const detail = await dockerContainer.inspect();
+    state = normalizeContainerState(detail.State.Health?.Status ?? detail.State.Status ?? status);
+    uptime = status === 'running' ? formatUptime(detail.State.StartedAt) : '0m';
+  } catch {
+    state = await getContainerState(container);
+  }
+
+  if (status === 'running') {
+    try {
+      const stats = (await dockerContainer.stats({ stream: false })) as DockerStatsSnapshot;
+      cpu = formatPercent(calculateCpuPercent(stats));
+      ram = formatBytes(stats.memory_stats?.usage ?? 0);
+    } catch {
+      cpu = '0.0%';
+      ram = '0 MB';
+    }
+  }
 
   return {
     id: container.Id.slice(0, 12),
     name: normalizeContainerName(container),
     image: container.Image,
-    status: normalizeContainerStatus(container),
+    status,
     state,
+    cpu,
+    ram,
+    uptime,
     created: formatContainerCreated(container.Created),
     ports: formatContainerPorts(container)
   };

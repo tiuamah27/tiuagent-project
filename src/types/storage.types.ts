@@ -11,6 +11,8 @@ export interface StorageSummary {
 export interface StorageFolder {
   path: string;
   label: string;
+  sizeBytes: number | null;
+  sizeFormatted: string;
   sizeGiB: number | null;
   status: StorageFolderStatus;
   error?: string;

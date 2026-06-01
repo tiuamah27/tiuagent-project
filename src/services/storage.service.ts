@@ -10,10 +10,11 @@ const ROOT_PATH = '/';
 const CACHE_TTL_SECONDS = 60;
 const CACHE_TTL_MS = CACHE_TTL_SECONDS * 1000;
 const FOLDER_SCAN_TIMEOUT_MS = 5000;
-const DEFAULT_STORAGE_PATHS = ['/opt/apps', '/opt/infra', '/home'];
+const DEFAULT_STORAGE_PATHS = ['/opt/apps', '/opt/infra', '/opt/backups', '/home'];
 const HOST_MOUNT_STORAGE_PATHS: Record<string, string> = {
   '/opt/apps': '/host/opt/apps',
   '/opt/infra': '/host/opt/infra',
+  '/opt/backups': '/host/opt/backups',
   '/home': '/host/home'
 };
 
@@ -27,6 +28,23 @@ function roundTo(value: number, digits = 1): number {
 
 function bytesToGiB(bytes: number): number {
   return bytes / 1024 ** 3;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+
+  const units = ['KB', 'MB', 'GB', 'TB'];
+  let value = bytes / 1024;
+  let unitIndex = 0;
+
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+
+  return `${roundTo(value)} ${units[unitIndex]}`;
 }
 
 function getStoragePaths(): string[] {
@@ -110,6 +128,8 @@ async function getFolderSize(path: string): Promise<StorageFolder> {
     return {
       path,
       label,
+      sizeBytes: null,
+      sizeFormatted: '0 B',
       sizeGiB: null,
       status: 'missing'
     };
@@ -126,6 +146,8 @@ async function getFolderSize(path: string): Promise<StorageFolder> {
       return {
         path,
         label,
+        sizeBytes: null,
+        sizeFormatted: '0 B',
         sizeGiB: null,
         status: 'error',
         error: 'Unable to parse folder size'
@@ -135,6 +157,8 @@ async function getFolderSize(path: string): Promise<StorageFolder> {
     return {
       path,
       label,
+      sizeBytes,
+      sizeFormatted: formatBytes(sizeBytes),
       sizeGiB: roundTo(bytesToGiB(sizeBytes), 3),
       status: 'ok'
     };
@@ -143,6 +167,8 @@ async function getFolderSize(path: string): Promise<StorageFolder> {
       return {
         path,
         label,
+        sizeBytes: null,
+        sizeFormatted: '0 B',
         sizeGiB: null,
         status: 'timeout',
         error: 'Folder scan timed out'
@@ -152,6 +178,8 @@ async function getFolderSize(path: string): Promise<StorageFolder> {
     return {
       path,
       label,
+      sizeBytes: null,
+      sizeFormatted: '0 B',
       sizeGiB: null,
       status: 'error',
       error: 'Folder scan failed'

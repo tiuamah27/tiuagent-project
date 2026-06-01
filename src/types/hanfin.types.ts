@@ -3,16 +3,25 @@ export interface HanFinResponse {
   container: 'hanfin';
   status: 'running' | 'stopped';
   healthy: boolean;
+  version: string;
+  branch: string;
+  commit: string;
   deployment: {
     environment: string;
   };
   application: {
-    version: 'unknown';
-    branch: 'unknown';
-    commit: 'unknown';
+    version: string;
+    branch: string;
+    commit: string;
   };
   database: {
-    status: 'unavailable';
+    status: string;
   };
   timestamp: string;
+}
+
+export interface HanFinActionResponse {
+  success: boolean;
+  message: string;
+  output?: string;
 }

@@ -10,6 +10,9 @@ export interface DockerContainer {
   image: string;
   status: string;
   state: string;
+  cpu: string;
+  ram: string;
+  uptime: string;
   created: string;
   ports: string[];
 }

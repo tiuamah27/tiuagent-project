@@ -13,6 +13,9 @@ export interface AppEntity {
   status: string;
   healthy: boolean;
   image: string;
+  version: string;
+  url: string;
+  manageUrl: string;
   created: string;
 }
 

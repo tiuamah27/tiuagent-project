@@ -6,48 +6,73 @@ interface AppDefinition {
   name: string;
   type: AppType;
   containers: string[];
+  url: string;
+  manageUrl: string;
 }
 
 const APP_DEFINITIONS: AppDefinition[] = [
   {
     name: 'HanFin',
     type: 'application',
-    containers: ['hanfin']
+    containers: ['hanfin'],
+    url: 'https://hanfin.tiuserver.my.id',
+    manageUrl: 'https://hanfin.tiuserver.my.id'
   },
   {
     name: 'n8n',
     type: 'automation',
-    containers: ['n8n']
+    containers: ['n8n'],
+    url: 'https://n8n.tiuserver.my.id',
+    manageUrl: 'https://n8n.tiuserver.my.id'
   },
   {
     name: 'PostgreSQL',
     type: 'database',
-    containers: ['postgres', 'n8n-postgres']
+    containers: ['postgres', 'n8n-postgres'],
+    url: '',
+    manageUrl: ''
   },
   {
     name: 'Portainer',
     type: 'infrastructure',
-    containers: ['portainer']
+    containers: ['portainer'],
+    url: 'https://portainer.tiuserver.my.id',
+    manageUrl: 'https://portainer.tiuserver.my.id'
   },
   {
     name: 'Beszel',
     type: 'monitoring',
-    containers: ['beszel']
+    containers: ['beszel'],
+    url: 'https://beszel.tiuserver.my.id',
+    manageUrl: 'https://beszel.tiuserver.my.id'
   },
   {
     name: 'Beszel Agent',
     type: 'monitoring',
-    containers: ['beszel-agent']
+    containers: ['beszel-agent'],
+    url: 'https://beszel.tiuserver.my.id',
+    manageUrl: 'https://beszel.tiuserver.my.id'
   },
   {
     name: 'Uptime Kuma',
     type: 'monitoring',
-    containers: ['uptime-kuma']
+    containers: ['uptime-kuma'],
+    url: 'https://uptime.tiuserver.my.id',
+    manageUrl: 'https://uptime.tiuserver.my.id'
+  },
+  {
+    name: 'Cloudflare',
+    type: 'infrastructure',
+    containers: ['cloudflared', 'cloudflare', 'cloudflare-tunnel'],
+    url: 'https://cloudflare.tiuserver.my.id',
+    manageUrl: 'https://cloudflare.tiuserver.my.id'
   },
   {
     name: 'TiuAgent',
     type: 'system',
-    containers: ['tiu-agent']
+    containers: ['tiu-agent'],
+    url: 'https://agent.tiuserver.my.id',
+    manageUrl: 'https://agent.tiuserver.my.id'
   }
 ];
 
@@ -73,6 +98,16 @@ function formatCustomAppName(containerName: string): string {
     .join(' ');
 }
 
+export function extractVersion(image: string): string {
+  const tag = image.split(':').at(-1);
+
+  if (!tag || tag === image || tag.includes('/')) {
+    return 'latest';
+  }
+
+  return tag;
+}
+
 function isHealthy(container: DockerContainer): boolean {
   if (container.state === 'unhealthy') {
     return false;
@@ -91,6 +126,9 @@ function mapContainerToApp(container: DockerContainer): AppEntity {
     status: container.status,
     healthy: isHealthy(container),
     image: container.image,
+    version: extractVersion(container.image),
+    url: definition?.url ?? '',
+    manageUrl: definition?.manageUrl ?? '',
     created: container.created
   };
 }
