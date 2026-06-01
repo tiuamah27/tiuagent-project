@@ -21,6 +21,7 @@ services:
       - /opt/apps:/host/opt/apps:ro
       - /opt/infra:/host/opt/infra:ro
       - /opt/backups:/host/opt/backups:ro
+      - /sys/class/net:/host/sys/class/net:ro
     healthcheck:
       test:
         [

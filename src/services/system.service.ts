@@ -1,4 +1,4 @@
-import { readdir, readFile, statfs } from 'node:fs/promises';
+import { access, lstat, readdir, readFile, statfs } from 'node:fs/promises';
 import { cpus, freemem, totalmem } from 'node:os';
 import type { SystemResponse } from '../types/system.types.js';
 
@@ -9,11 +9,15 @@ interface CpuSnapshot {
 
 interface NetworkSnapshot {
   timestamp: number;
+  statsPath: string;
+  interfaceName: string;
   rxBytes: number;
   txBytes: number;
 }
 
-const NETWORK_INTERFACE_PATH = '/sys/class/net';
+const HOST_NETWORK_INTERFACE_PATH = '/host/sys/class/net';
+const CONTAINER_NETWORK_INTERFACE_PATH = '/sys/class/net';
+const DEFAULT_ROUTE_PATH = '/proc/net/route';
 const IGNORED_INTERFACE_PATTERNS = [/^lo$/, /^docker/, /^br-/, /^veth/];
 
 let previousNetworkSnapshot: NetworkSnapshot | null = null;
@@ -31,30 +35,126 @@ function isUsableNetworkInterface(name: string): boolean {
   return !IGNORED_INTERFACE_PATTERNS.some((pattern) => pattern.test(name));
 }
 
-async function readNetworkCounter(interfaceName: string, counter: 'rx_bytes' | 'tx_bytes'): Promise<number> {
-  const value = await readFile(`${NETWORK_INTERFACE_PATH}/${interfaceName}/statistics/${counter}`, 'utf8');
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function getNetworkStatsPath(): Promise<string> {
+  return (await pathExists(HOST_NETWORK_INTERFACE_PATH)) ? HOST_NETWORK_INTERFACE_PATH : CONTAINER_NETWORK_INTERFACE_PATH;
+}
+
+async function readNetworkCounter(
+  statsPath: string,
+  interfaceName: string,
+  counter: 'rx_bytes' | 'tx_bytes'
+): Promise<number> {
+  const value = await readFile(`${statsPath}/${interfaceName}/statistics/${counter}`, 'utf8');
   const parsed = Number(value.trim());
 
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-async function getNetworkSnapshot(): Promise<NetworkSnapshot> {
-  const interfaces = (await readdir(NETWORK_INTERFACE_PATH)).filter(isUsableNetworkInterface);
-  const counters = await Promise.all(
-    interfaces.map(async (interfaceName) => {
-      const [rxBytes, txBytes] = await Promise.all([
-        readNetworkCounter(interfaceName, 'rx_bytes'),
-        readNetworkCounter(interfaceName, 'tx_bytes')
-      ]);
+async function getDefaultRouteInterface(availableInterfaces: string[]): Promise<string | null> {
+  try {
+    const routeTable = await readFile(DEFAULT_ROUTE_PATH, 'utf8');
+    const routes = routeTable.trim().split('\n').slice(1);
 
-      return { rxBytes, txBytes };
-    })
+    for (const route of routes) {
+      const [interfaceName, destination] = route.trim().split(/\s+/);
+
+      if (destination === '00000000' && availableInterfaces.includes(interfaceName)) {
+        return interfaceName;
+      }
+    }
+  } catch {
+    return null;
+  }
+
+  return null;
+}
+
+async function isPhysicalInterface(statsPath: string, interfaceName: string): Promise<boolean> {
+  try {
+    await lstat(`${statsPath}/${interfaceName}/device`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function isInterfaceUp(statsPath: string, interfaceName: string): Promise<boolean> {
+  try {
+    const state = await readFile(`${statsPath}/${interfaceName}/operstate`, 'utf8');
+    return state.trim() === 'up';
+  } catch {
+    return false;
+  }
+}
+
+async function getBestAvailableInterface(statsPath: string, interfaces: string[]): Promise<string | null> {
+  const ranked = await Promise.all(
+    interfaces.map(async (interfaceName) => ({
+      interfaceName,
+      isPhysical: await isPhysicalInterface(statsPath, interfaceName),
+      isUp: await isInterfaceUp(statsPath, interfaceName)
+    }))
   );
+
+  ranked.sort((left, right) => {
+    if (left.isUp !== right.isUp) {
+      return left.isUp ? -1 : 1;
+    }
+
+    if (left.isPhysical !== right.isPhysical) {
+      return left.isPhysical ? -1 : 1;
+    }
+
+    return left.interfaceName.localeCompare(right.interfaceName);
+  });
+
+  return ranked[0]?.interfaceName ?? null;
+}
+
+async function getPrimaryNetworkInterface(statsPath: string): Promise<string | null> {
+  const interfaces = (await readdir(statsPath)).filter(isUsableNetworkInterface);
+
+  if (interfaces.length === 0) {
+    return null;
+  }
+
+  return (await getDefaultRouteInterface(interfaces)) ?? getBestAvailableInterface(statsPath, interfaces);
+}
+
+async function getNetworkSnapshot(): Promise<NetworkSnapshot> {
+  const statsPath = await getNetworkStatsPath();
+  const interfaceName = await getPrimaryNetworkInterface(statsPath);
+
+  if (!interfaceName) {
+    return {
+      timestamp: Date.now(),
+      statsPath,
+      interfaceName: 'unavailable',
+      rxBytes: 0,
+      txBytes: 0
+    };
+  }
+
+  const [rxBytes, txBytes] = await Promise.all([
+    readNetworkCounter(statsPath, interfaceName, 'rx_bytes'),
+    readNetworkCounter(statsPath, interfaceName, 'tx_bytes')
+  ]);
 
   return {
     timestamp: Date.now(),
-    rxBytes: counters.reduce((sum, counter) => sum + counter.rxBytes, 0),
-    txBytes: counters.reduce((sum, counter) => sum + counter.txBytes, 0)
+    statsPath,
+    interfaceName,
+    rxBytes,
+    txBytes
   };
 }
 
@@ -64,7 +164,7 @@ async function getNetworkThroughput(): Promise<SystemResponse['network']> {
     const previous = previousNetworkSnapshot;
     previousNetworkSnapshot = current;
 
-    if (!previous) {
+    if (!previous || previous.statsPath !== current.statsPath || previous.interfaceName !== current.interfaceName) {
       return {
         downloadMbps: 0,
         uploadMbps: 0
