@@ -230,7 +230,14 @@ async function getNetworkThroughput(logger?: Logger): Promise<SystemResponse['ne
       downloadMbps,
       uploadMbps
     };
-  } catch {
+  } catch (error) {
+    logger?.info(
+      {
+        error: error instanceof Error ? error.message : String(error)
+      },
+      'NETWORK ERROR'
+    );
+
     return {
       downloadMbps: 0,
       uploadMbps: 0
