@@ -221,8 +221,8 @@ async function getNetworkThroughput(logger?: Logger): Promise<SystemResponse['ne
 
     const rxDelta = Math.max(0, current.rxBytes - previous.rxBytes);
     const txDelta = Math.max(0, current.txBytes - previous.txBytes);
-    const downloadMbps = roundTo(((rxDelta * 8) / seconds) / 1_000_000);
-    const uploadMbps = roundTo(((txDelta * 8) / seconds) / 1_000_000);
+    const downloadMbps = Number((((rxDelta * 8) / seconds) / 1_000_000).toFixed(2));
+    const uploadMbps = Number((((txDelta * 8) / seconds) / 1_000_000).toFixed(2));
 
     logNetworkDebug(logger, current, previous, seconds, rxDelta, txDelta, downloadMbps, uploadMbps);
 
