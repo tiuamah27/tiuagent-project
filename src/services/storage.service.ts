@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { access, statfs } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { promisify } from 'node:util';
+import Docker from 'dockerode';
 import type {
   DockerVolumeUsage,
   StorageCategory,
@@ -13,6 +14,7 @@ import type {
 const execFileAsync = promisify(execFile);
 
 const ROOT_PATH = '/';
+const DEFAULT_DOCKER_SOCKET_PATH = '/var/run/docker.sock';
 const CACHE_TTL_SECONDS = 60;
 const CACHE_TTL_MS = CACHE_TTL_SECONDS * 1000;
 const FOLDER_SCAN_TIMEOUT_MS = 5000;
@@ -36,6 +38,19 @@ const HOST_MOUNT_STORAGE_PATHS: Record<string, string> = {
 
 let cachedResponse: StorageResponse | null = null;
 let cachedAt = 0;
+
+const docker = new Docker({
+  socketPath: process.env.DOCKER_SOCKET_PATH ?? DEFAULT_DOCKER_SOCKET_PATH
+});
+
+interface DockerVolumeListItem {
+  Name?: string;
+  Mountpoint?: string;
+}
+
+interface DockerVolumeListResponse {
+  Volumes?: DockerVolumeListItem[];
+}
 
 function roundTo(value: number, digits = 1): number {
   const multiplier = 10 ** digits;
@@ -253,38 +268,40 @@ async function getStorageCategories(): Promise<StorageCategory[]> {
   return categories.sort((a, b) => b.sizeBytes - a.sizeBytes);
 }
 
-async function getDockerVolumeNames(): Promise<string[]> {
+async function getDockerVolumes(): Promise<DockerVolumeListItem[]> {
   try {
-    const { stdout } = await execFileAsync('docker', ['volume', 'ls', '-q'], {
-      timeout: FOLDER_SCAN_TIMEOUT_MS,
-      windowsHide: true
-    });
+    const volumes = (await docker.listVolumes()) as DockerVolumeListResponse;
 
-    return stdout
-      .split(/\r?\n/)
-      .map((name) => name.trim())
-      .filter(Boolean);
+    return volumes.Volumes ?? [];
   } catch {
     return [];
   }
 }
 
-async function getDockerVolumeMountpoint(name: string): Promise<string | null> {
-  try {
-    const { stdout } = await execFileAsync('docker', ['volume', 'inspect', name], {
-      timeout: FOLDER_SCAN_TIMEOUT_MS,
-      windowsHide: true
-    });
-    const parsed = JSON.parse(stdout) as Array<{ Mountpoint?: string }>;
+async function getDockerVolumeMountpoint(volume: DockerVolumeListItem): Promise<string | null> {
+  if (volume.Mountpoint) {
+    return volume.Mountpoint;
+  }
 
-    return parsed[0]?.Mountpoint ?? null;
+  if (!volume.Name) {
+    return null;
+  }
+
+  try {
+    const inspected = (await docker.getVolume(volume.Name).inspect()) as DockerVolumeListItem;
+
+    return inspected.Mountpoint ?? null;
   } catch {
     return null;
   }
 }
 
-async function getDockerVolumeUsage(name: string): Promise<DockerVolumeUsage | null> {
-  const mountpoint = await getDockerVolumeMountpoint(name);
+async function getDockerVolumeUsage(volume: DockerVolumeListItem): Promise<DockerVolumeUsage | null> {
+  if (!volume.Name) {
+    return null;
+  }
+
+  const mountpoint = await getDockerVolumeMountpoint(volume);
 
   if (!mountpoint) {
     return null;
@@ -293,7 +310,7 @@ async function getDockerVolumeUsage(name: string): Promise<DockerVolumeUsage | n
   const sizeBytes = await getPathSizeBytes(mountpoint);
 
   return {
-    name,
+    name: volume.Name,
     path: mountpoint,
     sizeBytes,
     sizeFormatted: formatBytes(sizeBytes),
@@ -302,8 +319,8 @@ async function getDockerVolumeUsage(name: string): Promise<DockerVolumeUsage | n
 }
 
 async function getLargestDockerVolumes(): Promise<DockerVolumeUsage[]> {
-  const volumeNames = await getDockerVolumeNames();
-  const volumes = await Promise.all(volumeNames.map((name) => getDockerVolumeUsage(name)));
+  const dockerVolumes = await getDockerVolumes();
+  const volumes = await Promise.all(dockerVolumes.map((volume) => getDockerVolumeUsage(volume)));
 
   return volumes
     .filter((volume): volume is DockerVolumeUsage => volume !== null)
