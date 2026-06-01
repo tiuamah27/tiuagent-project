@@ -2,7 +2,13 @@ import { execFile } from 'node:child_process';
 import { access, statfs } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { promisify } from 'node:util';
-import type { StorageFolder, StorageResponse, StorageSummary } from '../types/storage.types.js';
+import type {
+  DockerVolumeUsage,
+  StorageCategory,
+  StorageFolder,
+  StorageResponse,
+  StorageSummary
+} from '../types/storage.types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -11,11 +17,21 @@ const CACHE_TTL_SECONDS = 60;
 const CACHE_TTL_MS = CACHE_TTL_SECONDS * 1000;
 const FOLDER_SCAN_TIMEOUT_MS = 5000;
 const DEFAULT_STORAGE_PATHS = ['/opt/apps', '/opt/infra', '/opt/backups', '/home'];
+const STORAGE_CATEGORIES = [
+  { name: 'Docker Volumes', path: '/var/lib/docker/volumes' },
+  { name: 'Backups', path: '/opt/backups' },
+  { name: 'Apps', path: '/opt/apps' },
+  { name: 'Infrastructure', path: '/opt/infra' },
+  { name: 'Logs', path: '/var/log' }
+] as const;
+const LARGEST_VOLUME_LIMIT = 10;
 const HOST_MOUNT_STORAGE_PATHS: Record<string, string> = {
   '/opt/apps': '/host/opt/apps',
   '/opt/infra': '/host/opt/infra',
   '/opt/backups': '/host/opt/backups',
-  '/home': '/host/home'
+  '/home': '/host/home',
+  '/var/lib/docker/volumes': '/host/var/lib/docker/volumes',
+  '/var/log': '/host/var/log'
 };
 
 let cachedResponse: StorageResponse | null = null;
@@ -78,6 +94,18 @@ async function resolveRuntimePath(path: string): Promise<string> {
     return hostMountPath;
   }
 
+  for (const [sourcePath, mountedPath] of Object.entries(HOST_MOUNT_STORAGE_PATHS)) {
+    if (!path.startsWith(`${sourcePath}/`)) {
+      continue;
+    }
+
+    const candidatePath = `${mountedPath}${path.slice(sourcePath.length)}`;
+
+    if (await pathExists(candidatePath)) {
+      return candidatePath;
+    }
+  }
+
   return path;
 }
 
@@ -102,6 +130,26 @@ function isTimeoutError(error: unknown): boolean {
     'killed' in error &&
     (error as { killed?: boolean }).killed === true
   );
+}
+
+async function getPathSizeBytes(path: string): Promise<number> {
+  const runtimePath = await resolveRuntimePath(path);
+
+  if (!(await pathExists(runtimePath))) {
+    return 0;
+  }
+
+  try {
+    const { stdout } = await execFileAsync('du', ['-sb', runtimePath], {
+      timeout: FOLDER_SCAN_TIMEOUT_MS,
+      windowsHide: true
+    });
+    const sizeBytes = Number(stdout.trim().split(/\s+/)[0]);
+
+    return Number.isFinite(sizeBytes) ? sizeBytes : 0;
+  } catch {
+    return 0;
+  }
 }
 
 async function getDiskSummary(): Promise<StorageSummary> {
@@ -187,6 +235,82 @@ async function getFolderSize(path: string): Promise<StorageFolder> {
   }
 }
 
+async function getStorageCategory(category: (typeof STORAGE_CATEGORIES)[number]): Promise<StorageCategory> {
+  const sizeBytes = await getPathSizeBytes(category.path);
+
+  return {
+    name: category.name,
+    path: category.path,
+    sizeBytes,
+    sizeFormatted: formatBytes(sizeBytes),
+    sizeGiB: roundTo(bytesToGiB(sizeBytes), 3)
+  };
+}
+
+async function getStorageCategories(): Promise<StorageCategory[]> {
+  const categories = await Promise.all(STORAGE_CATEGORIES.map((category) => getStorageCategory(category)));
+
+  return categories.sort((a, b) => b.sizeBytes - a.sizeBytes);
+}
+
+async function getDockerVolumeNames(): Promise<string[]> {
+  try {
+    const { stdout } = await execFileAsync('docker', ['volume', 'ls', '-q'], {
+      timeout: FOLDER_SCAN_TIMEOUT_MS,
+      windowsHide: true
+    });
+
+    return stdout
+      .split(/\r?\n/)
+      .map((name) => name.trim())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function getDockerVolumeMountpoint(name: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('docker', ['volume', 'inspect', name], {
+      timeout: FOLDER_SCAN_TIMEOUT_MS,
+      windowsHide: true
+    });
+    const parsed = JSON.parse(stdout) as Array<{ Mountpoint?: string }>;
+
+    return parsed[0]?.Mountpoint ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function getDockerVolumeUsage(name: string): Promise<DockerVolumeUsage | null> {
+  const mountpoint = await getDockerVolumeMountpoint(name);
+
+  if (!mountpoint) {
+    return null;
+  }
+
+  const sizeBytes = await getPathSizeBytes(mountpoint);
+
+  return {
+    name,
+    path: mountpoint,
+    sizeBytes,
+    sizeFormatted: formatBytes(sizeBytes),
+    sizeGiB: roundTo(bytesToGiB(sizeBytes), 3)
+  };
+}
+
+async function getLargestDockerVolumes(): Promise<DockerVolumeUsage[]> {
+  const volumeNames = await getDockerVolumeNames();
+  const volumes = await Promise.all(volumeNames.map((name) => getDockerVolumeUsage(name)));
+
+  return volumes
+    .filter((volume): volume is DockerVolumeUsage => volume !== null)
+    .sort((a, b) => b.sizeBytes - a.sizeBytes)
+    .slice(0, LARGEST_VOLUME_LIMIT);
+}
+
 function getCachedResponse(): StorageResponse | null {
   if (!cachedResponse) {
     return null;
@@ -205,14 +329,18 @@ export async function getStorageOverview(): Promise<StorageResponse> {
   }
 
   const refreshedAt = new Date().toISOString();
-  const [summary, folders] = await Promise.all([
+  const [summary, folders, categories, largestVolumes] = await Promise.all([
     getDiskSummary(),
-    Promise.all(getStoragePaths().map((path) => getFolderSize(path)))
+    Promise.all(getStoragePaths().map((path) => getFolderSize(path))),
+    getStorageCategories(),
+    getLargestDockerVolumes()
   ]);
 
   const response: StorageResponse = {
     summary,
     folders,
+    categories,
+    largestVolumes,
     timestamp: refreshedAt,
     cache: {
       enabled: true,

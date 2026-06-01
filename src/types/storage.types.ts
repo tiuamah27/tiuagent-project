@@ -18,6 +18,22 @@ export interface StorageFolder {
   error?: string;
 }
 
+export interface StorageCategory {
+  name: string;
+  path: string;
+  sizeBytes: number;
+  sizeFormatted: string;
+  sizeGiB: number;
+}
+
+export interface DockerVolumeUsage {
+  name: string;
+  path: string;
+  sizeBytes: number;
+  sizeFormatted: string;
+  sizeGiB: number;
+}
+
 export interface StorageCacheInfo {
   enabled: true;
   ttlSeconds: number;
@@ -27,6 +43,8 @@ export interface StorageCacheInfo {
 export interface StorageResponse {
   summary: StorageSummary;
   folders: StorageFolder[];
+  categories: StorageCategory[];
+  largestVolumes: DockerVolumeUsage[];
   timestamp: string;
   cache: StorageCacheInfo;
 }
