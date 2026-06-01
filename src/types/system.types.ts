@@ -27,4 +27,8 @@ export interface SystemResponse {
     used: number;
     total: number;
   };
+  network: {
+    downloadMbps: number;
+    uploadMbps: number;
+  };
 }
