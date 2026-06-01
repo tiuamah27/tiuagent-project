@@ -2,6 +2,10 @@ import { access, lstat, readdir, readFile, statfs } from 'node:fs/promises';
 import { cpus, freemem, totalmem } from 'node:os';
 import type { SystemResponse } from '../types/system.types.js';
 
+interface Logger {
+  info(bindings: Record<string, unknown>, message: string): void;
+}
+
 interface CpuSnapshot {
   idle: number;
   total: number;
@@ -29,6 +33,33 @@ function roundTo(value: number, digits = 1): number {
 
 function bytesToGiB(bytes: number): number {
   return bytes / 1024 ** 3;
+}
+
+function logNetworkDebug(
+  logger: Logger | undefined,
+  current: NetworkSnapshot,
+  previous: NetworkSnapshot | null,
+  deltaSeconds: number,
+  deltaRx: number,
+  deltaTx: number,
+  downloadMbps: number,
+  uploadMbps: number
+): void {
+  logger?.info(
+    {
+      selectedInterface: current.interfaceName,
+      rxBytes: current.rxBytes,
+      txBytes: current.txBytes,
+      previousRxBytes: previous?.rxBytes ?? null,
+      previousTxBytes: previous?.txBytes ?? null,
+      deltaRx,
+      deltaTx,
+      deltaSeconds,
+      downloadMbps,
+      uploadMbps
+    },
+    'NETWORK DEBUG'
+  );
 }
 
 function isUsableNetworkInterface(name: string): boolean {
@@ -162,13 +193,15 @@ async function getNetworkSnapshot(): Promise<NetworkSnapshot> {
   };
 }
 
-async function getNetworkThroughput(): Promise<SystemResponse['network']> {
+async function getNetworkThroughput(logger?: Logger): Promise<SystemResponse['network']> {
   try {
     const current = await getNetworkSnapshot();
     const previous = previousNetworkSnapshot;
     previousNetworkSnapshot = current;
 
     if (!previous || previous.statsPath !== current.statsPath || previous.interfaceName !== current.interfaceName) {
+      logNetworkDebug(logger, current, previous, 0, 0, 0, 0, 0);
+
       return {
         downloadMbps: 0,
         uploadMbps: 0
@@ -178,6 +211,8 @@ async function getNetworkThroughput(): Promise<SystemResponse['network']> {
     const seconds = (current.timestamp - previous.timestamp) / 1000;
 
     if (seconds <= 0) {
+      logNetworkDebug(logger, current, previous, seconds, 0, 0, 0, 0);
+
       return {
         downloadMbps: 0,
         uploadMbps: 0
@@ -186,10 +221,14 @@ async function getNetworkThroughput(): Promise<SystemResponse['network']> {
 
     const rxDelta = Math.max(0, current.rxBytes - previous.rxBytes);
     const txDelta = Math.max(0, current.txBytes - previous.txBytes);
+    const downloadMbps = roundTo(((rxDelta * 8) / seconds) / 1_000_000);
+    const uploadMbps = roundTo(((txDelta * 8) / seconds) / 1_000_000);
+
+    logNetworkDebug(logger, current, previous, seconds, rxDelta, txDelta, downloadMbps, uploadMbps);
 
     return {
-      downloadMbps: roundTo(((rxDelta * 8) / seconds) / 1_000_000),
-      uploadMbps: roundTo(((txDelta * 8) / seconds) / 1_000_000)
+      downloadMbps,
+      uploadMbps
     };
   } catch {
     return {
@@ -234,11 +273,11 @@ async function getCpuUsage(): Promise<number> {
   return Math.round((1 - idleDelta / totalDelta) * 100);
 }
 
-export async function getSystemMetrics(): Promise<SystemResponse> {
+export async function getSystemMetrics(logger?: Logger): Promise<SystemResponse> {
   const [cpuUsage, diskStats, network] = await Promise.all([
     getCpuUsage(),
     statfs('/'),
-    getNetworkThroughput()
+    getNetworkThroughput(logger)
   ]);
 
   const memoryTotal = totalmem();
