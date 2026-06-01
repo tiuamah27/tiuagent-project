@@ -17,8 +17,8 @@ interface NetworkSnapshot {
 
 const HOST_NETWORK_INTERFACE_PATH = '/host/sys/class/net';
 const CONTAINER_NETWORK_INTERFACE_PATH = '/sys/class/net';
-const DEFAULT_ROUTE_PATH = '/proc/net/route';
 const IGNORED_INTERFACE_PATTERNS = [/^lo$/, /^docker/, /^br-/, /^veth/];
+const PREFERRED_INTERFACE_NAMES = ['eno1', 'eth0'];
 
 let previousNetworkSnapshot: NetworkSnapshot | null = null;
 
@@ -59,25 +59,6 @@ async function readNetworkCounter(
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-async function getDefaultRouteInterface(availableInterfaces: string[]): Promise<string | null> {
-  try {
-    const routeTable = await readFile(DEFAULT_ROUTE_PATH, 'utf8');
-    const routes = routeTable.trim().split('\n').slice(1);
-
-    for (const route of routes) {
-      const [interfaceName, destination] = route.trim().split(/\s+/);
-
-      if (destination === '00000000' && availableInterfaces.includes(interfaceName)) {
-        return interfaceName;
-      }
-    }
-  } catch {
-    return null;
-  }
-
-  return null;
-}
-
 async function isPhysicalInterface(statsPath: string, interfaceName: string): Promise<boolean> {
   try {
     await lstat(`${statsPath}/${interfaceName}/device`);
@@ -94,6 +75,21 @@ async function isInterfaceUp(statsPath: string, interfaceName: string): Promise<
   } catch {
     return false;
   }
+}
+
+async function getFirstPhysicalUpInterface(statsPath: string, interfaces: string[]): Promise<string | null> {
+  for (const interfaceName of interfaces) {
+    const [isPhysical, isUp] = await Promise.all([
+      isPhysicalInterface(statsPath, interfaceName),
+      isInterfaceUp(statsPath, interfaceName)
+    ]);
+
+    if (isPhysical && isUp) {
+      return interfaceName;
+    }
+  }
+
+  return null;
 }
 
 async function getBestAvailableInterface(statsPath: string, interfaces: string[]): Promise<string | null> {
@@ -120,6 +116,10 @@ async function getBestAvailableInterface(statsPath: string, interfaces: string[]
   return ranked[0]?.interfaceName ?? null;
 }
 
+function getPreferredInterface(interfaces: string[]): string | null {
+  return PREFERRED_INTERFACE_NAMES.find((interfaceName) => interfaces.includes(interfaceName)) ?? null;
+}
+
 async function getPrimaryNetworkInterface(statsPath: string): Promise<string | null> {
   const interfaces = (await readdir(statsPath)).filter(isUsableNetworkInterface);
 
@@ -127,7 +127,11 @@ async function getPrimaryNetworkInterface(statsPath: string): Promise<string | n
     return null;
   }
 
-  return (await getDefaultRouteInterface(interfaces)) ?? getBestAvailableInterface(statsPath, interfaces);
+  return (
+    getPreferredInterface(interfaces) ??
+    (await getFirstPhysicalUpInterface(statsPath, interfaces)) ??
+    getBestAvailableInterface(statsPath, interfaces)
+  );
 }
 
 async function getNetworkSnapshot(): Promise<NetworkSnapshot> {
