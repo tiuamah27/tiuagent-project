@@ -1,8 +1,30 @@
-import { readdir, stat, readFile as fsReadFile } from 'node:fs/promises';
+import { readdir, stat, readFile as fsReadFile, access } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { FileEntry, FileContent, FileType } from '../types/files.types.js';
 
 const ALLOWED_PATHS = ['/opt', '/home', '/etc', '/var/log'];
+const HOST_MOUNT_PATHS: Record<string, string> = {
+  '/opt': '/host/opt',
+  '/home': '/host/home',
+  '/etc': '/host/etc',
+  '/var/log': '/host/var/log',
+};
+
+async function resolveRuntimePath(p: string): Promise<string> {
+  for (const [key, hostPath] of Object.entries(HOST_MOUNT_PATHS)) {
+    if (p === key || p.startsWith(`${key}/`)) {
+      const mapped = p.replace(key, hostPath);
+      try {
+        await access(mapped);
+        return mapped;
+      } catch {
+        // Fallback
+      }
+    }
+  }
+  return p;
+}
+
 const MAX_READ_SIZE_BYTES = 1024 * 1024; // 1MB
 const SENSITIVE_KEYS = ['password', 'secret', 'token', 'key', 'api_key', 'pass', 'auth'];
 
@@ -42,13 +64,15 @@ export async function listFiles(dirPath: string): Promise<FileEntry[]> {
     throw new Error('Forbidden path');
   }
 
-  const entries = await readdir(dirPath, { withFileTypes: true });
+  const runtimeDirPath = await resolveRuntimePath(dirPath);
+  const entries = await readdir(runtimeDirPath, { withFileTypes: true });
   const results: FileEntry[] = [];
 
   for (const entry of entries) {
     const fullPath = join(dirPath, entry.name);
+    const runtimeFullPath = join(runtimeDirPath, entry.name);
     try {
-      const stats = await stat(fullPath);
+      const stats = await stat(runtimeFullPath);
       results.push({
         name: entry.name,
         path: fullPath,
@@ -98,7 +122,9 @@ export async function readFileContent(filePath: string): Promise<FileContent> {
     throw new Error('Forbidden path');
   }
 
-  const stats = await stat(filePath);
+  const runtimeFilePath = await resolveRuntimePath(filePath);
+
+  const stats = await stat(runtimeFilePath);
   if (!stats.isFile()) {
     throw new Error('Not a file');
   }
@@ -114,7 +140,7 @@ export async function readFileContent(filePath: string): Promise<FileContent> {
   }
 
   try {
-    const buffer = await fsReadFile(filePath);
+    const buffer = await fsReadFile(runtimeFilePath);
     const content = buffer.toString('utf8');
     
     // Check if it's binary by looking for null bytes
