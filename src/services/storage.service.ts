@@ -128,14 +128,13 @@ async function getStorageCategories(): Promise<StorageCategory[]> {
         path: cat.path,
         sizeGB: roundTo(bytesToGiB(sizeBytes), 3),
         color: cat.color,
-        _sizeBytes: sizeBytes,
+        sizeBytes: sizeBytes,
       };
     })
   );
 
   return results
-    .sort((a, b) => b._sizeBytes - a._sizeBytes)
-    .map(({ _sizeBytes, ...rest }) => rest);
+    .sort((a, b) => b.sizeBytes - a.sizeBytes);
 }
 
 async function getDockerVolumes(): Promise<DockerVolumeListItem[]> {
@@ -181,6 +180,7 @@ async function getDockerVolumeUsage(volume: DockerVolumeListItem): Promise<Docke
     name: volume.Name,
     mountpoint,
     sizeGB: roundTo(bytesToGiB(sizeBytes), 3),
+    sizeBytes: sizeBytes,
   };
 }
 
