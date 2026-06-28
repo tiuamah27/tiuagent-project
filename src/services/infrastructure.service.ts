@@ -1,9 +1,13 @@
-import { hostname as osHostname } from 'node:os';
 import { getAppsOverview } from './apps.service.js';
 import { getDockerOverview } from './docker.service.js';
 import { getStorageOverview } from './storage.service.js';
 import { getSystemMetrics } from './system.service.js';
 import type { InfrastructureResponse } from '../types/infrastructure.types.js';
+
+function roundTo(value: number, digits = 1): number {
+  const multiplier = 10 ** digits;
+  return Math.round(value * multiplier) / multiplier;
+}
 
 export async function getInfrastructureOverview(): Promise<InfrastructureResponse> {
   const [system, storage, docker] = await Promise.all([
@@ -14,32 +18,28 @@ export async function getInfrastructureOverview(): Promise<InfrastructureRespons
 
   const apps = await getAppsOverview();
 
+  let containersRunning = 0;
+  let containersTotal = 0;
+  if (Array.isArray(docker)) {
+    containersTotal = docker.length;
+    containersRunning = docker.filter(c => c.status === 'running').length;
+  }
+
+  let appsHealthy = 0;
+  let appsTotal = 0;
+  if (Array.isArray(apps)) {
+    appsTotal = apps.length;
+    appsHealthy = apps.filter(a => a.healthy).length;
+  }
+
+  const storagePercent = storage.totalGB > 0 ? roundTo((storage.usedGB / storage.totalGB) * 100) : 0;
+
   return {
-    server: {
-      hostname: process.env.SERVER_HOSTNAME ?? osHostname(),
-      status: 'online'
-    },
-    system: {
-      cpu: {
-        usage: system.cpu.usage
-      },
-      memory: {
-        used: system.memory.used,
-        total: system.memory.total
-      }
-    },
-    storage: {
-      usedPercent: storage.summary.usagePercent
-    },
-    docker: {
-      status: 'containers' in docker ? 'online' : 'unavailable',
-      containers: 'containers' in docker ? docker.summary.total : 0,
-      running: 'containers' in docker ? docker.summary.running : 0
-    },
-    applications: {
-      total: 'apps' in apps ? apps.summary.total : 0,
-      healthy: 'apps' in apps ? apps.apps.filter((app) => app.healthy).length : 0
-    },
-    timestamp: new Date().toISOString()
+    server: system,
+    containersRunning,
+    containersTotal,
+    appsHealthy,
+    appsTotal,
+    storagePercent
   };
 }

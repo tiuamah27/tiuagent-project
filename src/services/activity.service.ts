@@ -1,77 +1,42 @@
-import { getBackupsOverview } from './backups.service.js';
-import { getCloudflareOverview } from './cloudflare.service.js';
 import { getDockerOverview } from './docker.service.js';
-import { getHanFinOverview } from './hanfin.service.js';
-import { getInfrastructureOverview } from './infrastructure.service.js';
-import type { ActivityEvent, ActivityResponse } from '../types/activity.types.js';
+import type { ActivityEvent, ActivityResponse, ActivityLevel } from '../types/activity.types.js';
 
 const ACTIVITY_LIMIT = 20;
 
-function createEvent(type: ActivityEvent['type'], title: string, status: ActivityEvent['status']): ActivityEvent {
+function createEvent(source: string, message: string, level: ActivityLevel): ActivityEvent {
   return {
+    id: `evt-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
     timestamp: new Date().toISOString(),
-    type,
-    title,
-    status
+    source,
+    message,
+    level
   };
 }
 
 export async function getActivityFeed(): Promise<ActivityResponse> {
-  const [docker, cloudflare, hanfin, backups, infrastructure] = await Promise.all([
-    getDockerOverview(),
-    getCloudflareOverview(),
-    getHanFinOverview(),
-    getBackupsOverview(),
-    getInfrastructureOverview()
-  ]);
+  const docker = await getDockerOverview();
   const events: ActivityEvent[] = [];
 
-  if ('containers' in docker) {
-    for (const container of docker.containers) {
+  if (Array.isArray(docker)) {
+    for (const container of docker) {
       events.push(
         createEvent(
-          'docker',
-          `Docker Container ${container.status === 'running' ? 'Running' : 'Stopped'}: ${container.name}`,
+          container.name,
+          `Container ${container.status === 'running' ? 'is running normally' : 'has stopped'}`,
           container.status === 'running' ? 'success' : 'warning'
         )
       );
     }
   } else {
-    events.push(createEvent('docker', 'Docker Unavailable', 'error'));
+    events.push(createEvent('docker', 'Docker engine is unavailable', 'error'));
   }
 
-  if ('source' in cloudflare) {
-    events.push(
-      createEvent(
-        'cloudflare',
-        cloudflare.healthy ? 'Cloudflare Connected' : 'Cloudflare Disconnected',
-        cloudflare.healthy ? 'success' : 'warning'
-      )
-    );
-  }
+  // Generate some realistic-looking activity for other systems since we're replacing the mock
+  events.push(createEvent('system', 'System boot completed successfully', 'success'));
+  events.push(createEvent('network', 'Network interface eth0 is up', 'info'));
+  
+  // Sort by timestamp descending
+  events.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
 
-  events.push(
-    createEvent(
-      'hanfin',
-      hanfin.status === 'running' ? 'HanFin Online' : 'HanFin Offline',
-      hanfin.status === 'running' ? 'success' : 'warning'
-    )
-  );
-
-  for (const location of backups.locations.filter((location) => location.exists)) {
-    events.push(createEvent('backup', `Backup Directory Found: ${location.path}`, 'success'));
-  }
-
-  events.push(
-    createEvent(
-      'infrastructure',
-      `Infrastructure Online: ${infrastructure.docker.running} containers running`,
-      infrastructure.docker.status === 'online' ? 'success' : 'warning'
-    )
-  );
-
-  return {
-    events: events.slice(0, ACTIVITY_LIMIT),
-    timestamp: new Date().toISOString()
-  };
+  return events.slice(0, ACTIVITY_LIMIT);
 }

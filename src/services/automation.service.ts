@@ -22,7 +22,7 @@ interface N8nDatabaseConfig {
 }
 
 function findN8nApp(apps: AppEntity[]): AppEntity | null {
-  return apps.find((app) => app.name === 'n8n' || N8N_CONTAINER_NAMES.includes(app.container)) ?? null;
+  return apps.find((app) => app.name === 'n8n' || (app.container && N8N_CONTAINER_NAMES.includes(app.container))) ?? null;
 }
 
 function parseEnv(env: string[] | undefined): Record<string, string> {
@@ -183,10 +183,10 @@ async function getN8nCounts(container: string): Promise<{ workflows: number; exe
 
 export async function getAutomationOverview(): Promise<AutomationResponse> {
   const appsOverview = await getAppsOverview();
-  const n8n = 'apps' in appsOverview ? findN8nApp(appsOverview.apps) : null;
+  const n8n = Array.isArray(appsOverview) ? findN8nApp(appsOverview) : null;
   const online = n8n?.status === 'running';
   const version = n8n?.version ?? (n8n?.image ? extractVersion(n8n.image) : 'latest');
-  const counts = online && n8n ? await getN8nCounts(n8n.container) : { workflows: 0, executions: 0 };
+  const counts = online && n8n && n8n.container ? await getN8nCounts(n8n.container) : { workflows: 0, executions: 0 };
 
   return {
     name: 'n8n',

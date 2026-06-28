@@ -8,7 +8,7 @@ const execFileAsync = promisify(execFile);
 const CLOUDFLARE_CONTAINERS = ['cloudflared', 'cloudflare', 'cloudflare-tunnel'];
 
 function findCloudflareTunnelApp(apps: AppEntity[]): AppEntity | null {
-  return apps.find((app) => CLOUDFLARE_CONTAINERS.includes(app.container)) ?? null;
+  return apps.find((app) => app.container && CLOUDFLARE_CONTAINERS.includes(app.container)) ?? null;
 }
 
 async function isCloudflaredProcessRunning(): Promise<boolean> {
@@ -26,7 +26,7 @@ async function isCloudflaredProcessRunning(): Promise<boolean> {
 
 export async function getCloudflareOverview(): Promise<CloudflareResponse> {
   const appsOverview = await getAppsOverview();
-  const cloudflareTunnel = 'apps' in appsOverview ? findCloudflareTunnelApp(appsOverview.apps) : null;
+  const cloudflareTunnel = Array.isArray(appsOverview) ? findCloudflareTunnelApp(appsOverview) : null;
 
   if (!cloudflareTunnel) {
     const processRunning = await isCloudflaredProcessRunning();
@@ -56,7 +56,7 @@ export async function getCloudflareOverview(): Promise<CloudflareResponse> {
 
   return {
     name: 'Cloudflare Tunnel',
-    container: cloudflareTunnel.container,
+    container: cloudflareTunnel.container ?? '',
     status: cloudflareTunnel.status,
     healthy,
     source: 'docker',

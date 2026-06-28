@@ -1,50 +1,19 @@
-export type StorageFolderStatus = 'ok' | 'missing' | 'timeout' | 'error';
-
-export interface StorageSummary {
-  path: '/';
-  totalGiB: number;
-  usedGiB: number;
-  freeGiB: number;
-  usagePercent: number;
-}
-
-export interface StorageFolder {
-  path: string;
-  label: string;
-  sizeBytes: number | null;
-  sizeFormatted: string;
-  sizeGiB: number | null;
-  status: StorageFolderStatus;
-  error?: string;
-}
-
 export interface StorageCategory {
-  name: string;
+  label: string;
   path: string;
-  sizeBytes: number;
-  sizeFormatted: string;
-  sizeGiB: number;
+  sizeGB: number;
+  color: string;
 }
 
-export interface DockerVolumeUsage {
+export interface DockerVolume {
   name: string;
-  path: string;
-  sizeBytes: number;
-  sizeFormatted: string;
-  sizeGiB: number;
-}
-
-export interface StorageCacheInfo {
-  enabled: true;
-  ttlSeconds: number;
-  refreshedAt: string;
+  mountpoint: string;
+  sizeGB: number;
 }
 
 export interface StorageResponse {
-  summary: StorageSummary;
-  folders: StorageFolder[];
+  totalGB: number;
+  usedGB: number;
   categories: StorageCategory[];
-  largestVolumes: DockerVolumeUsage[];
-  timestamp: string;
-  cache: StorageCacheInfo;
+  volumes: DockerVolume[];
 }

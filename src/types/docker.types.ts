@@ -1,26 +1,19 @@
-export interface DockerSummary {
-  total: number;
-  running: number;
-  stopped: number;
-}
+export type ContainerStatus = 'running' | 'stopped' | 'paused' | 'restarting' | 'dead';
 
 export interface DockerContainer {
   id: string;
   name: string;
   image: string;
-  status: string;
-  state: string;
-  cpu: string;
-  ram: string;
+  version: string;
+  status: ContainerStatus;
+  cpu: number;
+  ram: number;
   uptime: string;
-  created: string;
+  restartCount: number;
+  lastRestart: string | null;
   ports: string[];
-}
-
-export interface DockerAvailableResponse {
-  summary: DockerSummary;
-  containers: DockerContainer[];
-  timestamp: string;
+  branch?: string;
+  commit?: string;
 }
 
 export interface DockerUnavailableResponse {
@@ -28,4 +21,4 @@ export interface DockerUnavailableResponse {
   reason: 'permission_denied' | 'socket_not_found' | 'docker_connection_failed';
 }
 
-export type DockerResponse = DockerAvailableResponse | DockerUnavailableResponse;
+export type DockerResponse = DockerContainer[] | DockerUnavailableResponse;

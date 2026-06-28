@@ -13,6 +13,7 @@ import { rootRoutes } from './routes/root.js';
 import { storageRoutes } from './routes/storage.js';
 import { systemRoutes } from './routes/system.js';
 import { versionRoutes } from './routes/version.js';
+import { filesRoutes } from './routes/files.js';
 
 interface ServerConfig {
   host: string;
@@ -98,6 +99,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(cloudflareRoutes, { prefix: '/api/v1' });
   await app.register(backupsRoutes, { prefix: '/api/v1' });
   await app.register(activityRoutes, { prefix: '/api/v1' });
+  await app.register(filesRoutes, { prefix: '/api/v1' });
 
   return app;
 }

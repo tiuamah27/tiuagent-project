@@ -1,5 +1,5 @@
 import { access, lstat, readdir, readFile, statfs } from 'node:fs/promises';
-import { cpus, freemem, totalmem } from 'node:os';
+import { cpus, freemem, hostname, loadavg, totalmem, uptime } from 'node:os';
 import type { SystemResponse } from '../types/system.types.js';
 
 interface Logger {
@@ -193,7 +193,7 @@ async function getNetworkSnapshot(): Promise<NetworkSnapshot> {
   };
 }
 
-async function getNetworkThroughput(logger?: Logger): Promise<SystemResponse['network']> {
+async function getNetworkThroughput(logger?: Logger): Promise<{ download: number; upload: number }> {
   try {
     const current = await getNetworkSnapshot();
     const previous = previousNetworkSnapshot;
@@ -203,8 +203,8 @@ async function getNetworkThroughput(logger?: Logger): Promise<SystemResponse['ne
       logNetworkDebug(logger, current, previous, 0, 0, 0, 0, 0);
 
       return {
-        downloadMbps: 0,
-        uploadMbps: 0
+        download: 0,
+        upload: 0
       };
     }
 
@@ -214,22 +214,19 @@ async function getNetworkThroughput(logger?: Logger): Promise<SystemResponse['ne
       logNetworkDebug(logger, current, previous, seconds, 0, 0, 0, 0);
 
       return {
-        downloadMbps: 0,
-        uploadMbps: 0
+        download: 0,
+        upload: 0
       };
     }
 
     const rxDelta = Math.max(0, current.rxBytes - previous.rxBytes);
     const txDelta = Math.max(0, current.txBytes - previous.txBytes);
-    const downloadMbps = Number((((rxDelta * 8) / seconds) / 1_000_000).toFixed(2));
-    const uploadMbps = Number((((txDelta * 8) / seconds) / 1_000_000).toFixed(2));
+    const download = Number((((rxDelta * 8) / seconds) / 1_000_000).toFixed(2));
+    const upload = Number((((txDelta * 8) / seconds) / 1_000_000).toFixed(2));
 
-    logNetworkDebug(logger, current, previous, seconds, rxDelta, txDelta, downloadMbps, uploadMbps);
+    logNetworkDebug(logger, current, previous, seconds, rxDelta, txDelta, download, upload);
 
-    return {
-      downloadMbps,
-      uploadMbps
-    };
+    return { download, upload };
   } catch (error) {
     logger?.info(
       {
@@ -238,10 +235,7 @@ async function getNetworkThroughput(logger?: Logger): Promise<SystemResponse['ne
       'NETWORK ERROR'
     );
 
-    return {
-      downloadMbps: 0,
-      uploadMbps: 0
-    };
+    return { download: 0, upload: 0 };
   }
 }
 
@@ -280,11 +274,45 @@ async function getCpuUsage(): Promise<number> {
   return Math.round((1 - idleDelta / totalDelta) * 100);
 }
 
+function formatUptime(seconds: number): string {
+  const days = Math.floor(seconds / 86400);
+  const hours = Math.floor((seconds % 86400) / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+
+  if (days > 0) {
+    return `${days}d ${hours}h ${minutes}m`;
+  }
+
+  if (hours > 0) {
+    return `${hours}h ${minutes}m`;
+  }
+
+  return `${minutes}m`;
+}
+
+async function getOsInfo(): Promise<string | undefined> {
+  try {
+    const content = await readFile('/etc/os-release', 'utf8');
+    const match = content.match(/^PRETTY_NAME="?([^"\n]+)"?/m);
+    return match?.[1] ?? undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function getCpuInfo(): { cores: number; ghz: number } {
+  const allCpus = cpus();
+  const cores = allCpus.length;
+  const ghz = cores > 0 ? roundTo(allCpus[0].speed / 1000, 1) : 0;
+  return { cores, ghz };
+}
+
 export async function getSystemMetrics(logger?: Logger): Promise<SystemResponse> {
-  const [cpuUsage, diskStats, network] = await Promise.all([
+  const [cpuUsage, diskStats, network, osInfo] = await Promise.all([
     getCpuUsage(),
     statfs('/'),
-    getNetworkThroughput(logger)
+    getNetworkThroughput(logger),
+    getOsInfo()
   ]);
 
   const memoryTotal = totalmem();
@@ -293,21 +321,30 @@ export async function getSystemMetrics(logger?: Logger): Promise<SystemResponse>
   const diskFree = Number(diskStats.bfree) * Number(diskStats.bsize);
   const diskUsed = diskTotal - diskFree;
 
+  const memTotalGB = roundTo(bytesToGiB(memoryTotal));
+  const memUsedGB = roundTo(bytesToGiB(memoryUsed));
+  const diskTotalGB = Math.round(bytesToGiB(diskTotal));
+  const diskUsedGB = Math.round(bytesToGiB(diskUsed));
+
+  const la = loadavg();
+
   return {
-    cpu: {
-      usage: cpuUsage
-    },
-    memory: {
-      used: roundTo(bytesToGiB(memoryUsed)),
-      total: roundTo(bytesToGiB(memoryTotal))
+    cpu: cpuUsage,
+    cpuInfo: getCpuInfo(),
+    ram: {
+      used: memUsedGB,
+      total: memTotalGB,
+      percent: memTotalGB > 0 ? roundTo((memUsedGB / memTotalGB) * 100) : 0
     },
     disk: {
-      used: Math.round(bytesToGiB(diskUsed)),
-      total: Math.round(bytesToGiB(diskTotal))
+      used: diskUsedGB,
+      total: diskTotalGB,
+      percent: diskTotalGB > 0 ? roundTo((diskUsedGB / diskTotalGB) * 100) : 0
     },
-    network: {
-      downloadMbps: network.downloadMbps,
-      uploadMbps: network.uploadMbps
-    }
+    network,
+    uptime: formatUptime(uptime()),
+    hostname: hostname(),
+    os: osInfo,
+    loadAvg: [roundTo(la[0], 2), roundTo(la[1], 2), roundTo(la[2], 2)]
   };
 }

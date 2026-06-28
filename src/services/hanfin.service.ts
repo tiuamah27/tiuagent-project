@@ -188,7 +188,7 @@ export async function runHanFinAction(action: HanFinAction): Promise<HanFinActio
 
 export async function getHanFinOverview(): Promise<HanFinResponse> {
   const appsOverview = await getAppsOverview();
-  const hanfin = 'apps' in appsOverview ? findHanFinApp(appsOverview.apps) : null;
+  const hanfin = Array.isArray(appsOverview) ? findHanFinApp(appsOverview) : null;
   const paths = getHanFinPaths();
   const [version, gitMetadata] = await Promise.all([
     detectVersion(paths),

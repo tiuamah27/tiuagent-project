@@ -1,14 +1,11 @@
-export type ActivityEventType = 'docker' | 'health' | 'infrastructure' | 'backup' | 'cloudflare' | 'hanfin';
-export type ActivityEventStatus = 'success' | 'warning' | 'error' | 'info';
+export type ActivityLevel = 'success' | 'warning' | 'error' | 'info';
 
 export interface ActivityEvent {
+  id: string;
   timestamp: string;
-  type: ActivityEventType;
-  title: string;
-  status: ActivityEventStatus;
+  level: ActivityLevel;
+  source: string;
+  message: string;
 }
 
-export interface ActivityResponse {
-  events: ActivityEvent[];
-  timestamp: string;
-}
+export type ActivityResponse = ActivityEvent[];

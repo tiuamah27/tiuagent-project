@@ -2,7 +2,7 @@ import Docker from 'dockerode';
 import type { ContainerInfo } from 'dockerode';
 import { access } from 'node:fs/promises';
 import { constants } from 'node:fs';
-import type { DockerContainer, DockerResponse } from '../types/docker.types.js';
+import type { DockerContainer, DockerResponse, ContainerStatus } from '../types/docker.types.js';
 
 const CACHE_TTL_MS = 30_000;
 const DEFAULT_DOCKER_SOCKET_PATH = '/var/run/docker.sock';
@@ -102,48 +102,15 @@ function normalizeContainerName(container: ContainerInfo): string {
   return firstName.replace(/^\//, '');
 }
 
-function normalizeContainerStatus(container: ContainerInfo): string {
-  return container.State === 'running' ? 'running' : 'stopped';
+function normalizeContainerStatus(container: ContainerInfo): ContainerStatus {
+  const state = container.State?.toLowerCase() ?? 'stopped';
+  const validStatuses: ContainerStatus[] = ['running', 'stopped', 'paused', 'restarting', 'dead'];
+  return validStatuses.includes(state as ContainerStatus) ? (state as ContainerStatus) : 'stopped';
 }
 
-function normalizeContainerState(state: string): string {
-  if (state === 'healthy' || state === 'running') {
-    return state;
-  }
-
-  if (state === 'unhealthy') {
-    return 'unhealthy';
-  }
-
-  return 'stopped';
-}
-
-function formatContainerCreated(created: number): string {
-  return new Date(created * 1000).toISOString();
-}
-
-function formatContainerPorts(container: ContainerInfo): string[] {
-  return (container.Ports ?? []).map((port) => {
-    if (port.PublicPort) {
-      return `${port.PublicPort}:${port.PrivatePort}`;
-    }
-
-    return `${port.PrivatePort}/${port.Type}`;
-  });
-}
-
-function formatPercent(value: number): string {
-  return `${Math.max(0, value).toFixed(1)}%`;
-}
-
-function formatBytes(bytes: number): string {
-  const mib = bytes / 1024 ** 2;
-
-  if (mib < 1024) {
-    return `${Math.round(mib)} MB`;
-  }
-
-  return `${(mib / 1024).toFixed(1)} GB`;
+function extractVersionFromImage(image: string): string {
+  const parts = image.split(':');
+  return parts.length > 1 ? parts[parts.length - 1] : 'latest';
 }
 
 function formatUptime(startedAt?: string): string {
@@ -163,7 +130,7 @@ function formatUptime(startedAt?: string): string {
   const minutes = elapsedMinutes % 60;
 
   if (days > 0) {
-    return `${days}d ${hours}h`;
+    return `${days}d ${hours}h ${minutes}m`;
   }
 
   if (hours > 0) {
@@ -171,6 +138,16 @@ function formatUptime(startedAt?: string): string {
   }
 
   return `${minutes}m`;
+}
+
+function formatContainerPorts(container: ContainerInfo): string[] {
+  return (container.Ports ?? []).map((port) => {
+    if (port.PublicPort) {
+      return `${port.PublicPort}:${port.PrivatePort}`;
+    }
+
+    return `${port.PrivatePort}/${port.Type}`;
+  });
 }
 
 function calculateCpuPercent(stats: DockerStatsSnapshot): number {
@@ -189,56 +166,68 @@ function calculateCpuPercent(stats: DockerStatsSnapshot): number {
     return 0;
   }
 
-  return (cpuDelta / systemDelta) * onlineCpus * 100;
+  return Number(((cpuDelta / systemDelta) * onlineCpus * 100).toFixed(1));
 }
 
-async function getContainerState(container: ContainerInfo): Promise<string> {
-  try {
-    const detail = await docker.getContainer(container.Id).inspect();
-    return normalizeContainerState(detail.State.Health?.Status ?? detail.State.Status ?? normalizeContainerStatus(container));
-  } catch {
-    return normalizeContainerStatus(container);
-  }
+function bytesToMB(bytes: number): number {
+  return Math.round(bytes / 1024 / 1024);
+}
+
+function extractLabels(labels: Record<string, string> | undefined): { branch?: string; commit?: string } {
+  if (!labels) return {};
+  return {
+    branch: labels['tiuos.branch'] ?? labels['git.branch'] ?? undefined,
+    commit: labels['tiuos.commit'] ?? labels['git.commit'] ?? undefined,
+  };
 }
 
 async function mapContainer(container: ContainerInfo): Promise<DockerContainer> {
   const dockerContainer = docker.getContainer(container.Id);
   const status = normalizeContainerStatus(container);
-  let state = status;
-  let cpu = '0.0%';
-  let ram = '0 MB';
-  let uptime = '0m';
+  let cpu = 0;
+  let ram = 0;
+  let uptimeStr = '0m';
+  let restartCount = 0;
+  let lastRestart: string | null = null;
+  let labels: Record<string, string> = {};
 
   try {
     const detail = await dockerContainer.inspect();
-    state = normalizeContainerState(detail.State.Health?.Status ?? detail.State.Status ?? status);
-    uptime = status === 'running' ? formatUptime(detail.State.StartedAt) : '0m';
+    uptimeStr = status === 'running' ? formatUptime(detail.State.StartedAt) : '0m';
+    restartCount = detail.RestartCount ?? 0;
+    lastRestart = restartCount > 0 ? (detail.State.StartedAt ?? null) : null;
+    labels = detail.Config.Labels ?? {};
   } catch {
-    state = await getContainerState(container);
+    // fallback — keep defaults
   }
 
   if (status === 'running') {
     try {
       const stats = (await dockerContainer.stats({ stream: false })) as DockerStatsSnapshot;
-      cpu = formatPercent(calculateCpuPercent(stats));
-      ram = formatBytes(stats.memory_stats?.usage ?? 0);
+      cpu = calculateCpuPercent(stats);
+      ram = bytesToMB(stats.memory_stats?.usage ?? 0);
     } catch {
-      cpu = '0.0%';
-      ram = '0 MB';
+      cpu = 0;
+      ram = 0;
     }
   }
+
+  const { branch, commit } = extractLabels(labels);
 
   return {
     id: container.Id.slice(0, 12),
     name: normalizeContainerName(container),
     image: container.Image,
+    version: extractVersionFromImage(container.Image),
     status,
-    state,
     cpu,
     ram,
-    uptime,
-    created: formatContainerCreated(container.Created),
-    ports: formatContainerPorts(container)
+    uptime: uptimeStr,
+    restartCount,
+    lastRestart,
+    ports: formatContainerPorts(container),
+    branch,
+    commit,
   };
 }
 
@@ -252,17 +241,8 @@ export async function getDockerOverview(): Promise<DockerResponse> {
   try {
     const containerInfos = await docker.listContainers({ all: true });
     const containers = await Promise.all(containerInfos.map((container) => mapContainer(container)));
-    const running = containers.filter((container) => container.status === 'running').length;
 
-    return setCachedResponse({
-      summary: {
-        total: containers.length,
-        running,
-        stopped: containers.length - running
-      },
-      containers,
-      timestamp: new Date().toISOString()
-    });
+    return setCachedResponse(containers);
   } catch (error) {
     return setCachedResponse(await getDockerUnavailableReason(error));
   }

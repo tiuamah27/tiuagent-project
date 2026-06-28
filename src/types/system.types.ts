@@ -16,19 +16,13 @@ export interface HealthResponse {
 }
 
 export interface SystemResponse {
-  cpu: {
-    usage: number;
-  };
-  memory: {
-    used: number;
-    total: number;
-  };
-  disk: {
-    used: number;
-    total: number;
-  };
-  network: {
-    downloadMbps: number;
-    uploadMbps: number;
-  };
+  cpu: number;
+  cpuInfo?: { cores: number; ghz: number };
+  ram: { used: number; total: number; percent: number };
+  disk: { used: number; total: number; percent: number };
+  network: { download: number; upload: number };
+  uptime: string;
+  hostname: string;
+  os?: string;
+  loadAvg?: [number, number, number];
 }

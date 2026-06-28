@@ -1,28 +1,10 @@
+import type { SystemResponse } from './system.types.js';
+
 export interface InfrastructureResponse {
-  server: {
-    hostname: string;
-    status: 'online';
-  };
-  system: {
-    cpu: {
-      usage: number;
-    };
-    memory: {
-      used: number;
-      total: number;
-    };
-  };
-  storage: {
-    usedPercent: number;
-  };
-  docker: {
-    status: 'online' | 'unavailable';
-    containers: number;
-    running: number;
-  };
-  applications: {
-    total: number;
-    healthy: number;
-  };
-  timestamp: string;
+  server: SystemResponse;
+  containersRunning: number;
+  containersTotal: number;
+  appsHealthy: number;
+  appsTotal: number;
+  storagePercent: number;
 }

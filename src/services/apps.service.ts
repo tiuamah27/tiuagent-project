@@ -6,14 +6,14 @@ interface AppDefinition {
   name: string;
   type: AppType;
   containers: string[];
-  url: string;
-  manageUrl: string;
+  url?: string;
+  manageUrl?: string;
 }
 
 const APP_DEFINITIONS: AppDefinition[] = [
   {
     name: 'HanFin',
-    type: 'application',
+    type: 'finance',
     containers: ['hanfin'],
     url: 'https://hanfin.tiuserver.my.id',
     manageUrl: 'https://hanfin.tiuserver.my.id'
@@ -29,12 +29,10 @@ const APP_DEFINITIONS: AppDefinition[] = [
     name: 'PostgreSQL',
     type: 'database',
     containers: ['postgres', 'n8n-postgres'],
-    url: '',
-    manageUrl: ''
   },
   {
     name: 'Portainer',
-    type: 'infrastructure',
+    type: 'monitoring',
     containers: ['portainer'],
     url: 'https://portainer.tiuserver.my.id',
     manageUrl: 'https://portainer.tiuserver.my.id'
@@ -44,35 +42,32 @@ const APP_DEFINITIONS: AppDefinition[] = [
     type: 'monitoring',
     containers: ['beszel'],
     url: 'https://beszel.tiuserver.my.id',
-    manageUrl: 'https://beszel.tiuserver.my.id'
   },
   {
     name: 'Beszel Agent',
     type: 'monitoring',
     containers: ['beszel-agent'],
-    url: 'https://beszel.tiuserver.my.id',
-    manageUrl: 'https://beszel.tiuserver.my.id'
   },
   {
     name: 'Uptime Kuma',
     type: 'monitoring',
     containers: ['uptime-kuma'],
     url: 'https://uptime.tiuserver.my.id',
-    manageUrl: 'https://uptime.tiuserver.my.id'
   },
   {
-    name: 'Cloudflare',
-    type: 'infrastructure',
+    name: 'Cloudflared',
+    type: 'tunnel',
     containers: ['cloudflared', 'cloudflare', 'cloudflare-tunnel'],
-    url: 'https://cloudflare.tiuserver.my.id',
-    manageUrl: 'https://cloudflare.tiuserver.my.id'
+  },
+  {
+    name: 'Nginx',
+    type: 'custom',
+    containers: ['nginx', 'nginx-proxy'],
   },
   {
     name: 'TiuAgent',
-    type: 'system',
+    type: 'custom',
     containers: ['tiu-agent'],
-    url: 'https://agent.tiuserver.my.id',
-    manageUrl: 'https://agent.tiuserver.my.id'
   }
 ];
 
@@ -98,6 +93,13 @@ function formatCustomAppName(containerName: string): string {
     .join(' ');
 }
 
+function generateAppId(containerName: string): string {
+  return containerName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
 export function extractVersion(image: string): string {
   const tag = image.split(':').at(-1);
 
@@ -108,51 +110,35 @@ export function extractVersion(image: string): string {
   return tag;
 }
 
-function isHealthy(container: DockerContainer): boolean {
-  if (container.state === 'unhealthy') {
-    return false;
-  }
-
-  return container.state === 'healthy' || container.status === 'running';
-}
-
 function mapContainerToApp(container: DockerContainer): AppEntity {
   const definition = getAppDefinition(container.name);
 
   return {
+    id: generateAppId(container.name),
     name: definition?.name ?? formatCustomAppName(container.name),
-    container: container.name,
     type: definition?.type ?? 'custom',
-    status: container.status,
-    healthy: isHealthy(container),
-    image: container.image,
     version: extractVersion(container.image),
-    url: definition?.url ?? '',
-    manageUrl: definition?.manageUrl ?? '',
-    created: container.created
+    status: container.status,
+    url: definition?.url || undefined,
+    manageUrl: definition?.manageUrl || undefined,
+    container: container.name,
+    image: container.image,
+    healthy: container.status === 'running',
+    created: undefined, // will be populated if needed via inspect
+    branch: container.branch,
+    commit: container.commit,
   };
 }
 
 export async function getAppsOverview(): Promise<AppsResponse> {
   const dockerOverview = await getDockerOverview();
 
-  if (!('containers' in dockerOverview)) {
+  if (!Array.isArray(dockerOverview)) {
     return {
       status: 'unavailable',
       reason: dockerOverview.reason
     };
   }
 
-  const apps = dockerOverview.containers.map((container: DockerContainer) => mapContainerToApp(container));
-  const running = apps.filter((app: AppEntity) => app.status === 'running').length;
-
-  return {
-    summary: {
-      total: apps.length,
-      running,
-      stopped: apps.length - running
-    },
-    apps,
-    timestamp: new Date().toISOString()
-  };
+  return dockerOverview.map((container) => mapContainerToApp(container));
 }

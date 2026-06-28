@@ -1,28 +1,20 @@
-export type AppType = 'application' | 'automation' | 'database' | 'infrastructure' | 'monitoring' | 'system' | 'custom';
-
-export interface AppsSummary {
-  total: number;
-  running: number;
-  stopped: number;
-}
+export type AppType = 'monitoring' | 'database' | 'automation' | 'tunnel' | 'finance' | 'custom';
+export type ContainerStatus = 'running' | 'stopped' | 'paused' | 'restarting' | 'dead';
 
 export interface AppEntity {
+  id: string;
   name: string;
-  container: string;
   type: AppType;
-  status: string;
-  healthy: boolean;
-  image: string;
   version: string;
-  url: string;
-  manageUrl: string;
-  created: string;
-}
-
-export interface AppsAvailableResponse {
-  summary: AppsSummary;
-  apps: AppEntity[];
-  timestamp: string;
+  status: ContainerStatus;
+  url?: string;
+  manageUrl?: string;
+  container?: string;
+  image?: string;
+  healthy?: boolean;
+  created?: string;
+  branch?: string;
+  commit?: string;
 }
 
 export interface AppsUnavailableResponse {
@@ -30,4 +22,4 @@ export interface AppsUnavailableResponse {
   reason: 'permission_denied' | 'socket_not_found' | 'docker_connection_failed';
 }
 
-export type AppsResponse = AppsAvailableResponse | AppsUnavailableResponse;
+export type AppsResponse = AppEntity[] | AppsUnavailableResponse;

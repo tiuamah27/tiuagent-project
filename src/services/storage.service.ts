@@ -3,30 +3,25 @@ import { access, statfs } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { promisify } from 'node:util';
 import Docker from 'dockerode';
-import type {
-  DockerVolumeUsage,
-  StorageCategory,
-  StorageFolder,
-  StorageResponse,
-  StorageSummary
-} from '../types/storage.types.js';
+import type { StorageResponse, StorageCategory, DockerVolume } from '../types/storage.types.js';
 
 const execFileAsync = promisify(execFile);
 
 const ROOT_PATH = '/';
 const DEFAULT_DOCKER_SOCKET_PATH = '/var/run/docker.sock';
-const CACHE_TTL_SECONDS = 60;
-const CACHE_TTL_MS = CACHE_TTL_SECONDS * 1000;
+const CACHE_TTL_MS = 60_000;
 const FOLDER_SCAN_TIMEOUT_MS = 5000;
-const DEFAULT_STORAGE_PATHS = ['/opt/apps', '/opt/infra', '/opt/backups', '/home'];
-const STORAGE_CATEGORIES = [
-  { name: 'Docker Volumes', path: '/var/lib/docker/volumes' },
-  { name: 'Backups', path: '/opt/backups' },
-  { name: 'Apps', path: '/opt/apps' },
-  { name: 'Infrastructure', path: '/opt/infra' },
-  { name: 'Logs', path: '/var/log' }
-] as const;
 const LARGEST_VOLUME_LIMIT = 10;
+
+const CATEGORY_DEFINITIONS = [
+  { label: 'Aplikasi',  path: '/opt/apps',                color: '#3b82f6' },
+  { label: 'Database',  path: '/var/lib/docker/volumes',   color: '#8b5cf6' },
+  { label: 'Backup',    path: '/opt/backups',              color: '#f59e0b' },
+  { label: 'Infra',     path: '/opt/infra',                color: '#06b6d4' },
+  { label: 'Home',      path: '/home',                     color: '#10b981' },
+  { label: 'Logs',      path: '/var/log',                  color: '#6b7280' },
+] as const;
+
 const HOST_MOUNT_STORAGE_PATHS: Record<string, string> = {
   '/opt/apps': '/host/opt/apps',
   '/opt/infra': '/host/opt/infra',
@@ -61,38 +56,6 @@ function bytesToGiB(bytes: number): number {
   return bytes / 1024 ** 3;
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) {
-    return `${bytes} B`;
-  }
-
-  const units = ['KB', 'MB', 'GB', 'TB'];
-  let value = bytes / 1024;
-  let unitIndex = 0;
-
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024;
-    unitIndex += 1;
-  }
-
-  return `${roundTo(value)} ${units[unitIndex]}`;
-}
-
-function getStoragePaths(): string[] {
-  const rawPaths = process.env.STORAGE_PATHS;
-
-  if (!rawPaths) {
-    return DEFAULT_STORAGE_PATHS;
-  }
-
-  const paths = rawPaths
-    .split(',')
-    .map((path) => path.trim())
-    .filter(Boolean);
-
-  return paths.length > 0 ? paths : DEFAULT_STORAGE_PATHS;
-}
-
 async function pathExists(path: string): Promise<boolean> {
   try {
     await access(path, constants.F_OK);
@@ -124,29 +87,6 @@ async function resolveRuntimePath(path: string): Promise<string> {
   return path;
 }
 
-function getFolderLabel(path: string): string {
-  const lastSegment = path.split('/').filter(Boolean).at(-1);
-
-  if (!lastSegment) {
-    return path;
-  }
-
-  return lastSegment
-    .split(/[-_]/)
-    .filter(Boolean)
-    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-    .join(' ');
-}
-
-function isTimeoutError(error: unknown): boolean {
-  return (
-    typeof error === 'object' &&
-    error !== null &&
-    'killed' in error &&
-    (error as { killed?: boolean }).killed === true
-  );
-}
-
 async function getPathSizeBytes(path: string): Promise<number> {
   const runtimePath = await resolveRuntimePath(path);
 
@@ -167,111 +107,40 @@ async function getPathSizeBytes(path: string): Promise<number> {
   }
 }
 
-async function getDiskSummary(): Promise<StorageSummary> {
+async function getDiskSummary(): Promise<{ totalGB: number; usedGB: number }> {
   const stats = await statfs(ROOT_PATH);
   const totalBytes = Number(stats.blocks) * Number(stats.bsize);
   const freeBytes = Number(stats.bfree) * Number(stats.bsize);
   const usedBytes = totalBytes - freeBytes;
-  const usagePercent = totalBytes > 0 ? (usedBytes / totalBytes) * 100 : 0;
 
   return {
-    path: ROOT_PATH,
-    totalGiB: roundTo(bytesToGiB(totalBytes)),
-    usedGiB: roundTo(bytesToGiB(usedBytes)),
-    freeGiB: roundTo(bytesToGiB(freeBytes)),
-    usagePercent: roundTo(usagePercent)
-  };
-}
-
-async function getFolderSize(path: string): Promise<StorageFolder> {
-  const label = getFolderLabel(path);
-  const runtimePath = await resolveRuntimePath(path);
-
-  if (!(await pathExists(runtimePath))) {
-    return {
-      path,
-      label,
-      sizeBytes: null,
-      sizeFormatted: '0 B',
-      sizeGiB: null,
-      status: 'missing'
-    };
-  }
-
-  try {
-    const { stdout } = await execFileAsync('du', ['-sb', runtimePath], {
-      timeout: FOLDER_SCAN_TIMEOUT_MS,
-      windowsHide: true
-    });
-    const sizeBytes = Number(stdout.trim().split(/\s+/)[0]);
-
-    if (!Number.isFinite(sizeBytes)) {
-      return {
-        path,
-        label,
-        sizeBytes: null,
-        sizeFormatted: '0 B',
-        sizeGiB: null,
-        status: 'error',
-        error: 'Unable to parse folder size'
-      };
-    }
-
-    return {
-      path,
-      label,
-      sizeBytes,
-      sizeFormatted: formatBytes(sizeBytes),
-      sizeGiB: roundTo(bytesToGiB(sizeBytes), 3),
-      status: 'ok'
-    };
-  } catch (error) {
-    if (isTimeoutError(error)) {
-      return {
-        path,
-        label,
-        sizeBytes: null,
-        sizeFormatted: '0 B',
-        sizeGiB: null,
-        status: 'timeout',
-        error: 'Folder scan timed out'
-      };
-    }
-
-    return {
-      path,
-      label,
-      sizeBytes: null,
-      sizeFormatted: '0 B',
-      sizeGiB: null,
-      status: 'error',
-      error: 'Folder scan failed'
-    };
-  }
-}
-
-async function getStorageCategory(category: (typeof STORAGE_CATEGORIES)[number]): Promise<StorageCategory> {
-  const sizeBytes = await getPathSizeBytes(category.path);
-
-  return {
-    name: category.name,
-    path: category.path,
-    sizeBytes,
-    sizeFormatted: formatBytes(sizeBytes),
-    sizeGiB: roundTo(bytesToGiB(sizeBytes), 3)
+    totalGB: roundTo(bytesToGiB(totalBytes)),
+    usedGB: roundTo(bytesToGiB(usedBytes)),
   };
 }
 
 async function getStorageCategories(): Promise<StorageCategory[]> {
-  const categories = await Promise.all(STORAGE_CATEGORIES.map((category) => getStorageCategory(category)));
+  const results = await Promise.all(
+    CATEGORY_DEFINITIONS.map(async (cat) => {
+      const sizeBytes = await getPathSizeBytes(cat.path);
+      return {
+        label: cat.label,
+        path: cat.path,
+        sizeGB: roundTo(bytesToGiB(sizeBytes)),
+        color: cat.color,
+        _sizeBytes: sizeBytes,
+      };
+    })
+  );
 
-  return categories.sort((a, b) => b.sizeBytes - a.sizeBytes);
+  return results
+    .sort((a, b) => b._sizeBytes - a._sizeBytes)
+    .map(({ _sizeBytes, ...rest }) => rest);
 }
 
 async function getDockerVolumes(): Promise<DockerVolumeListItem[]> {
   try {
     const volumes = (await docker.listVolumes()) as DockerVolumeListResponse;
-
     return volumes.Volumes ?? [];
   } catch {
     return [];
@@ -289,14 +158,13 @@ async function getDockerVolumeMountpoint(volume: DockerVolumeListItem): Promise<
 
   try {
     const inspected = (await docker.getVolume(volume.Name).inspect()) as DockerVolumeListItem;
-
     return inspected.Mountpoint ?? null;
   } catch {
     return null;
   }
 }
 
-async function getDockerVolumeUsage(volume: DockerVolumeListItem): Promise<DockerVolumeUsage | null> {
+async function getDockerVolumeUsage(volume: DockerVolumeListItem): Promise<DockerVolume | null> {
   if (!volume.Name) {
     return null;
   }
@@ -311,20 +179,18 @@ async function getDockerVolumeUsage(volume: DockerVolumeListItem): Promise<Docke
 
   return {
     name: volume.Name,
-    path: mountpoint,
-    sizeBytes,
-    sizeFormatted: formatBytes(sizeBytes),
-    sizeGiB: roundTo(bytesToGiB(sizeBytes), 3)
+    mountpoint,
+    sizeGB: roundTo(bytesToGiB(sizeBytes)),
   };
 }
 
-async function getLargestDockerVolumes(): Promise<DockerVolumeUsage[]> {
+async function getLargestDockerVolumes(): Promise<DockerVolume[]> {
   const dockerVolumes = await getDockerVolumes();
   const volumes = await Promise.all(dockerVolumes.map((volume) => getDockerVolumeUsage(volume)));
 
   return volumes
-    .filter((volume): volume is DockerVolumeUsage => volume !== null)
-    .sort((a, b) => b.sizeBytes - a.sizeBytes)
+    .filter((volume): volume is DockerVolume => volume !== null)
+    .sort((a, b) => b.sizeGB - a.sizeGB)
     .slice(0, LARGEST_VOLUME_LIMIT);
 }
 
@@ -333,9 +199,7 @@ function getCachedResponse(): StorageResponse | null {
     return null;
   }
 
-  const cacheAge = Date.now() - cachedAt;
-
-  return cacheAge < CACHE_TTL_MS ? cachedResponse : null;
+  return Date.now() - cachedAt < CACHE_TTL_MS ? cachedResponse : null;
 }
 
 export async function getStorageOverview(): Promise<StorageResponse> {
@@ -345,25 +209,17 @@ export async function getStorageOverview(): Promise<StorageResponse> {
     return cached;
   }
 
-  const refreshedAt = new Date().toISOString();
-  const [summary, folders, categories, largestVolumes] = await Promise.all([
+  const [disk, categories, volumes] = await Promise.all([
     getDiskSummary(),
-    Promise.all(getStoragePaths().map((path) => getFolderSize(path))),
     getStorageCategories(),
     getLargestDockerVolumes()
   ]);
 
   const response: StorageResponse = {
-    summary,
-    folders,
+    totalGB: disk.totalGB,
+    usedGB: disk.usedGB,
     categories,
-    largestVolumes,
-    timestamp: refreshedAt,
-    cache: {
-      enabled: true,
-      ttlSeconds: CACHE_TTL_SECONDS,
-      refreshedAt
-    }
+    volumes,
   };
 
   cachedResponse = response;
