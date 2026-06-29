@@ -116,7 +116,7 @@ async function checkDocker(): Promise<boolean> {
         pushEvent(
           c.name,
           `Status changed: ${prev} → ${c.status}`,
-          c.status === 'running' ? 'success' : (c.status === 'exited' ? 'error' : 'warning')
+          c.status === 'running' ? 'success' : ((c.status === 'stopped' || c.status === 'dead') ? 'error' : 'warning')
         );
       }
       lastKnownContainerState[c.name] = c.status;
