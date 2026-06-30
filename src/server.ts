@@ -1,4 +1,5 @@
 import Fastify, { type FastifyInstance } from 'fastify';
+import fastifyWebsocket from '@fastify/websocket';
 import { registerCors } from './plugins/cors.js';
 import { activityRoutes } from './routes/activity.js';
 import { appsRoutes } from './routes/apps.js';
@@ -14,6 +15,7 @@ import { storageRoutes } from './routes/storage.js';
 import { systemRoutes } from './routes/system.js';
 import { versionRoutes } from './routes/version.js';
 import { filesRoutes } from './routes/files.js';
+import { terminalRoutes } from './routes/terminal.js';
 
 interface ServerConfig {
   host: string;
@@ -85,6 +87,7 @@ export async function buildServer(): Promise<FastifyInstance> {
 
   registerErrorHandlers(app);
 
+  await app.register(fastifyWebsocket);
   await registerCors(app);
   await app.register(rootRoutes);
   await app.register(versionRoutes, { prefix: '/api/v1' });
@@ -100,6 +103,7 @@ export async function buildServer(): Promise<FastifyInstance> {
   await app.register(backupsRoutes, { prefix: '/api/v1' });
   await app.register(activityRoutes, { prefix: '/api/v1' });
   await app.register(filesRoutes, { prefix: '/api/v1' });
+  await app.register(terminalRoutes, { prefix: '/api/v1' });
 
   return app;
 }
