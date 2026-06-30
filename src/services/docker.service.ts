@@ -247,3 +247,99 @@ export async function getDockerOverview(): Promise<DockerResponse> {
     return setCachedResponse(await getDockerUnavailableReason(error));
   }
 }
+
+export async function getContainerDetails(id: string) {
+  const container = docker.getContainer(id);
+  const detail = await container.inspect();
+  
+  // Create a pseudo ContainerInfo to reuse mapContainer
+  const pseudoInfo: ContainerInfo = {
+    Id: detail.Id,
+    Names: [detail.Name],
+    Image: detail.Config.Image,
+    ImageID: detail.Image,
+    Command: detail.Config.Cmd?.join(' ') || '',
+    Created: new Date(detail.Created).getTime() / 1000,
+    Ports: [], // can map from NetworkSettings if needed
+    Labels: detail.Config.Labels,
+    State: detail.State.Status,
+    Status: detail.State.Status,
+    HostConfig: { NetworkMode: detail.HostConfig?.NetworkMode || '' },
+    NetworkSettings: { Networks: {} },
+    Mounts: []
+  };
+
+  const base = await mapContainer(pseudoInfo);
+
+  // Mock historical data (since we don't have historical DB in agent)
+  const now = Date.now();
+  const generateHistory = (value: number) => Array.from({ length: 10 }).map((_, i) => ({
+    time: new Date(now - (9 - i) * 60000).toISOString(),
+    value: value * (0.8 + Math.random() * 0.4) // random fluctuation around current value
+  }));
+
+  const envVars = detail.Config.Env?.map(e => {
+    const [key, ...rest] = e.split('=');
+    return { key, value: rest.join('='), isSecret: key.includes('SECRET') || key.includes('TOKEN') || key.includes('PASSWORD') };
+  }) || [];
+
+  return {
+    ...base,
+    cpuHistory: generateHistory(base.cpu),
+    ramHistory: generateHistory(base.ram),
+    responseTimeHistory: generateHistory(45), // mock ms
+    commits: [],
+    envVars,
+    domain: 'localhost',
+    sslExpiryDays: 0,
+    healthStatus: base.status === 'running' ? 'healthy' : 'down'
+  };
+}
+
+export async function startContainer(id: string) {
+  const container = docker.getContainer(id);
+  await container.start();
+  cachedResponse = null; // invalidate cache
+  return { success: true, message: `Container ${id} started successfully.` };
+}
+
+export async function stopContainer(id: string) {
+  const container = docker.getContainer(id);
+  await container.stop();
+  cachedResponse = null;
+  return { success: true, message: `Container ${id} stopped successfully.` };
+}
+
+export async function restartContainer(id: string) {
+  const container = docker.getContainer(id);
+  await container.restart();
+  cachedResponse = null;
+  return { success: true, message: `Container ${id} restarted successfully.` };
+}
+
+export async function getContainerLogs(id: string, tail: number) {
+  const container = docker.getContainer(id);
+  const logsBuffer = await container.logs({ stdout: true, stderr: true, tail, timestamps: true });
+  
+  // parse multiplexed docker logs format if raw buffer
+  const logsStr = logsBuffer.toString('utf8');
+  const lines = logsStr.split('\n').filter(Boolean);
+  
+  return lines.map(line => {
+    // Docker log lines usually have 8 bytes header for stream type and size, but timestamps: true parses it as plain text if it's via dockerode text stream... wait, dockerode logs without stream:true returns a Buffer with headers.
+    // Let's just strip the 8 byte header if it exists.
+    let content = line;
+    if (Buffer.isBuffer(logsBuffer) && content.length > 8 && (content.charCodeAt(0) === 1 || content.charCodeAt(0) === 2)) {
+      content = content.slice(8);
+    }
+    
+    const parts = content.split(' ');
+    const timestamp = parts[0];
+    const text = parts.slice(1).join(' ');
+    
+    return {
+      timestamp: new Date(timestamp).getTime() > 0 ? timestamp : new Date().toISOString(),
+      text: text || content
+    };
+  });
+}

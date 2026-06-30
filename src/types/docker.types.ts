@@ -22,3 +22,42 @@ export interface DockerUnavailableResponse {
 }
 
 export type DockerResponse = DockerContainer[] | DockerUnavailableResponse;
+
+export interface MetricDataPoint {
+  time: string;
+  value: number;
+}
+
+export interface GitCommit {
+  hash: string;
+  message: string;
+  author: string;
+  date: string;
+}
+
+export interface EnvVar {
+  key: string;
+  value: string;
+  isSecret: boolean;
+}
+
+export interface AppDetails extends DockerContainer {
+  cpuHistory: MetricDataPoint[];
+  ramHistory: MetricDataPoint[];
+  responseTimeHistory: MetricDataPoint[];
+  commits: GitCommit[];
+  envVars: EnvVar[];
+  domain: string;
+  sslExpiryDays: number;
+  healthStatus: 'healthy' | 'degraded' | 'down';
+}
+
+export interface ActionResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface LogLine {
+  text: string;
+  timestamp: string;
+}
